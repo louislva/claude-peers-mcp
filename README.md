@@ -40,13 +40,19 @@ claude mcp add --scope user --transport stdio claude-peers -- \
 
 Replace `~/claude-peers-mcp` with wherever you cloned it.
 
-### 3. Run Claude Code with the channel
+### 3. Run Claude Code
 
 ```bash
-claude --dangerously-skip-permissions --dangerously-load-development-channels server:claude-peers
+claude
 ```
 
-That's it. The broker daemon starts automatically the first time.
+Peer messages arrive when you call `check_messages`. The broker daemon starts automatically the first time.
+
+For **instant push notifications** (messages appear without calling `check_messages`), launch with the experimental channels flag:
+
+```bash
+claude --dangerously-load-development-channels server:claude-peers
+```
 
 > **Tip:** Add it to an alias so you don't have to type it every time:
 >
@@ -177,6 +183,20 @@ peers.startPolling((msg) => {
 // Clean up on exit
 await peers.shutdown();
 ```
+
+## Chat Platform Bridges
+
+Route peer messages to Telegram, Slack, Discord, or any chat platform. Build a
+bridge that polls the broker and forwards messages using the `PeersClient` SDK.
+
+Messages use a `[channel]` prefix for routing:
+```
+[dev] Hey, the build is broken — can you check?
+[general] Status update: deployment complete
+```
+
+See [Chat Platform Bridge Guide](docs/guides/chat-platform-bridge.md) for the
+full pattern with Telegram, Slack, and Discord examples.
 
 ## Auto-summary
 
