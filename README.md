@@ -13,6 +13,18 @@ Let your Claude Code instances find each other and talk. When you're running 5 s
   └───────────────────────┘          └──────────────────────┘
 ```
 
+## Prerequisites
+
+- [Bun](https://bun.sh) (JavaScript runtime — required)
+- Claude Code v2.1.80+
+- claude.ai login (channels require it — API key auth won't work)
+
+Install Bun if you don't have it:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
 ## Quick start
 
 ### 1. Install
@@ -31,14 +43,77 @@ This makes claude-peers available in every Claude Code session, from any directo
 claude mcp add --scope user --transport stdio claude-peers -- bun ~/claude-peers-mcp/server.ts
 ```
 
-With secret scanning via [pipelock](https://github.com/luckyPipewrench/pipelock) ([setup guide](docs/guides/pipelock.md)):
+Or add it directly in your `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "claude-peers": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["/path/to/claude-peers-mcp/server.ts"]
+    }
+  }
+}
+```
+
+#### With environment variables (cross-machine)
+
+When connecting to a remote broker, pass `CLAUDE_PEERS_URL` and `CLAUDE_PEERS_TOKEN` via the `env` block:
+
+```json
+{
+  "mcpServers": {
+    "claude-peers": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["/path/to/claude-peers-mcp/server.ts"],
+      "env": {
+        "CLAUDE_PEERS_URL": "http://broker-host:7899",
+        "CLAUDE_PEERS_TOKEN": "your-secret-token"
+      }
+    }
+  }
+}
+```
+
+#### With pipelock scanning
+
+When wrapping through [pipelock](https://github.com/luckyPipewrench/pipelock) ([setup guide](docs/guides/pipelock.md)), use `--env` flags **before** `--` to pass environment variables through the proxy to the MCP server:
 
 ```bash
 claude mcp add --scope user --transport stdio claude-peers -- \
-  pipelock mcp proxy -- bun ~/claude-peers-mcp/server.ts
+  pipelock mcp proxy --env CLAUDE_PEERS_URL --env CLAUDE_PEERS_TOKEN -- \
+  bun ~/claude-peers-mcp/server.ts
 ```
 
-Replace `~/claude-peers-mcp` with wherever you cloned it.
+Or in `.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "claude-peers": {
+      "type": "stdio",
+      "command": "pipelock",
+      "args": [
+        "mcp", "proxy",
+        "--env", "CLAUDE_PEERS_URL",
+        "--env", "CLAUDE_PEERS_TOKEN",
+        "--",
+        "bun", "/path/to/claude-peers-mcp/server.ts"
+      ],
+      "env": {
+        "CLAUDE_PEERS_URL": "http://broker-host:7899",
+        "CLAUDE_PEERS_TOKEN": "your-secret-token"
+      }
+    }
+  }
+}
+```
+
+The `--env` flags tell pipelock to forward those environment variables to the child process. Without them, the MCP server won't see the broker URL or token.
+
+Replace `/path/to/claude-peers-mcp` with wherever you cloned it.
 
 ### 3. Run Claude Code
 
@@ -140,7 +215,9 @@ See [Pipelock Integration Guide](docs/guides/pipelock.md) for the full setup.
 
 ### 2. Point clients at the broker
 
-On each machine, set the broker URL and token when registering the MCP server:
+On each machine, set the broker URL and token. The recommended approach is to add the `env` block in `.claude.json` (see [Register the MCP server](#2-register-the-mcp-server) above for full examples).
+
+Or via the CLI:
 
 ```bash
 claude mcp add --scope user --transport stdio claude-peers -- \
@@ -257,6 +334,4 @@ See [examples/docker/docker-compose.yaml](examples/docker/docker-compose.yaml) f
 
 ## Requirements
 
-- [Bun](https://bun.sh)
-- Claude Code v2.1.80+
-- claude.ai login (channels require it — API key auth won't work)
+See [Prerequisites](#prerequisites) at the top of this file.
