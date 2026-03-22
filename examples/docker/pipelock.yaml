@@ -1,0 +1,25 @@
+# Pipelock config for claude-peers broker reverse proxy
+# Scans all POST bodies for secrets, responses for injection
+
+mode: balanced
+enforce: true
+
+request_body_scanning:
+  enabled: true
+  action: block
+
+response_scanning:
+  action: warn
+
+dlp:
+  scan_env: false
+  include_defaults: true
+
+fetch_proxy:
+  enabled: false
+forward_proxy:
+  enabled: false
+
+logging:
+  level: info
+  format: json

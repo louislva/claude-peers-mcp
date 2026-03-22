@@ -120,6 +120,18 @@ kubectl create secret generic claude-peers-auth -n claude-peers --from-literal=t
 kubectl apply -f examples/kubernetes/broker.yaml
 ```
 
+To add secret scanning on all broker traffic, use the pipelock-enhanced deployments instead:
+
+```bash
+# Docker with pipelock
+docker compose -f examples/docker/docker-compose-with-pipelock.yaml up -d
+
+# Kubernetes with pipelock
+kubectl apply -f examples/kubernetes/broker-with-pipelock.yaml
+```
+
+See [Pipelock Integration Guide](docs/guides/pipelock.md) for the full setup.
+
 ### 2. Point clients at the broker
 
 On each machine, set the broker URL and token when registering the MCP server:

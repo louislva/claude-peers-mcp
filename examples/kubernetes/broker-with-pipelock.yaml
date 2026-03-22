@@ -1,0 +1,173 @@
+# claude-peers broker with pipelock security scanning
+#
+# Pipelock runs as a reverse proxy sidecar in front of the broker.
+# All POST bodies (message text, registration data) are scanned for
+# secret exfiltration before reaching the broker. Responses are scanned
+# for prompt injection.
+#
+# Deploy with:
+#   kubectl create namespace claude-peers
+#   kubectl create secret generic claude-peers-auth -n claude-peers --from-literal=token=YOUR_TOKEN
+#   kubectl apply -f broker-with-pipelock.yaml
+#
+# Connect from Claude Code on any machine:
+#   CLAUDE_PEERS_URL=http://<node-ip>:30789 CLAUDE_PEERS_TOKEN=YOUR_TOKEN
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipelock-config
+  namespace: claude-peers
+data:
+  pipelock.yaml: |
+    mode: balanced
+    enforce: true
+    request_body_scanning:
+      enabled: true
+      action: block
+    response_scanning:
+      action: warn
+    dlp:
+      scan_env: false
+      include_defaults: true
+    fetch_proxy:
+      enabled: false
+    forward_proxy:
+      enabled: false
+    logging:
+      level: info
+      format: json
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-peers-broker
+  namespace: claude-peers
+  labels:
+    app: claude-peers-broker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: claude-peers-broker
+  template:
+    metadata:
+      labels:
+        app: claude-peers-broker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        # Pipelock reverse proxy — scans all traffic before it reaches the broker
+        - name: pipelock
+          image: ghcr.io/luckypipewrench/pipelock:latest
+          args:
+            - "run"
+            - "--listen=127.0.0.1:18888"
+            - "--reverse-proxy"
+            - "--reverse-upstream=http://127.0.0.1:7899"
+            - "--reverse-listen=:8888"
+            - "--config=/etc/pipelock/pipelock.yaml"
+          ports:
+            - containerPort: 8888
+              name: proxy
+          volumeMounts:
+            - name: pipelock-config
+              mountPath: /etc/pipelock
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8888
+            initialDelaySeconds: 2
+            periodSeconds: 10
+        # Broker — only accepts traffic from pipelock (localhost)
+        - name: broker
+          image: ghcr.io/louislva/claude-peers-broker:latest
+          env:
+            - name: CLAUDE_PEERS_HOST
+              value: "127.0.0.1"
+            - name: CLAUDE_PEERS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: claude-peers-auth
+                  key: token
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 50Mi
+        - name: pipelock-config
+          configMap:
+            name: pipelock-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-peers
+  namespace: claude-peers
+spec:
+  type: NodePort
+  selector:
+    app: claude-peers-broker
+  ports:
+    - port: 7899
+      targetPort: 8888  # Routes to pipelock, not broker directly
+      nodePort: 30789
+      protocol: TCP
+      name: broker
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: claude-peers
+  namespace: claude-peers
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8888
+          protocol: TCP
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
