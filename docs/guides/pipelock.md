@@ -7,6 +7,30 @@ Peer-to-peer messages between AI agents carry natural language that could
 contain leaked secrets (API keys, credentials) or injection payloads. Pipelock
 scans this traffic at multiple layers depending on your deployment.
 
+Pipelock is optional — claude-peers works without it. Add scanning where
+you need it: broker-side (Layer 2) requires no user install, client-side
+(Layer 1) requires pipelock on each machine.
+
+## Install
+
+**Broker side (Layer 2):** No install needed. The pipelock-enhanced
+deployment examples (`broker-with-pipelock.yaml`, `docker-compose-with-pipelock.yaml`)
+include pipelock as a container sidecar.
+
+**Client side (Layer 1, Layer 3):** Install pipelock on each machine:
+
+```bash
+# macOS
+brew install luckyPipewrench/tap/pipelock
+
+# Linux
+curl -L https://github.com/luckyPipewrench/pipelock/releases/latest/download/pipelock_linux_amd64.tar.gz | tar xz
+sudo mv pipelock /usr/local/bin/
+
+# Verify
+pipelock --version
+```
+
 ## Layer 1: MCP Proxy (Claude Code sessions)
 
 Wrap the claude-peers MCP server through pipelock. Every tool call is scanned:
