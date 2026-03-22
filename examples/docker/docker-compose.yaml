@@ -1,0 +1,22 @@
+# claude-peers broker — Docker Compose
+#
+# Start: docker compose up -d
+# Connect: CLAUDE_PEERS_URL=http://localhost:7899 CLAUDE_PEERS_TOKEN=changeme
+
+services:
+  broker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    ports:
+      - "7899:7899"
+    environment:
+      CLAUDE_PEERS_HOST: "0.0.0.0"
+      CLAUDE_PEERS_TOKEN: "${CLAUDE_PEERS_TOKEN:-changeme}"
+    volumes:
+      - peers-data:/data
+    restart: unless-stopped
+    read_only: true
+
+volumes:
+  peers-data:
