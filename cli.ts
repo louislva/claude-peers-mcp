@@ -97,7 +97,7 @@ switch (cmd) {
         }>
       >("/list-peers", {
         scope: useNetwork ? "network" : "machine",
-        hostname: (await import("os")).hostname(),
+        hostname: HOSTNAME,
         cwd: "/",
         git_root: null,
       });
