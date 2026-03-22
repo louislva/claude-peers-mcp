@@ -1,11 +1,11 @@
 /**
- * Generate a 1-2 sentence summary of what a Claude Code instance is likely
- * working on, based on its working directory and git context.
+ * Generate a summary of what a Claude Code instance is likely working on,
+ * based on its working directory and git context.
  *
- * Uses OpenAI's gpt-5.4-nano for cheap, fast inference.
- * Requires OPENAI_API_KEY environment variable.
- * Falls back gracefully if unavailable.
+ * Pure local — no LLM calls, no API keys needed.
  */
+
+import { basename } from "node:path";
 
 export async function generateSummary(context: {
   cwd: string;
@@ -13,59 +13,19 @@ export async function generateSummary(context: {
   git_branch?: string | null;
   recent_files?: string[];
 }): Promise<string | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return null;
+  const project = basename(context.git_root ?? context.cwd);
+  const parts: string[] = [`Working on ${project}`];
+
+  if (context.git_branch && context.git_branch !== "HEAD") {
+    parts[0] += ` (${context.git_branch})`;
   }
 
-  const parts = [`Working directory: ${context.cwd}`];
-  if (context.git_root) {
-    parts.push(`Git repo root: ${context.git_root}`);
-  }
-  if (context.git_branch) {
-    parts.push(`Branch: ${context.git_branch}`);
-  }
   if (context.recent_files && context.recent_files.length > 0) {
-    parts.push(`Recently modified files: ${context.recent_files.join(", ")}`);
+    const files = context.recent_files.slice(0, 5).join(", ");
+    parts.push(`Recent files: ${files}`);
   }
 
-  try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-5.4-nano",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You generate brief summaries of what a developer is working on based on their project context. Respond with exactly 1-2 sentences, no more. Be specific about the project name and likely task.",
-          },
-          {
-            role: "user",
-            content: `Based on this context, what is this developer likely working on?\n\n${parts.join("\n")}`,
-          },
-        ],
-        max_tokens: 100,
-        temperature: 0.3,
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!res.ok) {
-      return null;
-    }
-
-    const data = (await res.json()) as {
-      choices: Array<{ message: { content: string } }>;
-    };
-    return data.choices[0]?.message?.content?.trim() ?? null;
-  } catch {
-    return null;
-  }
+  return parts.join(". ") + ".";
 }
 
 /**

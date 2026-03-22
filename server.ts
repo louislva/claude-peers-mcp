@@ -91,6 +91,22 @@ async function ensureBroker(): Promise<void> {
   throw new Error("Failed to start broker daemon after 6 seconds");
 }
 
+// --- OpenClaw integration ---
+
+/**
+ * Fire-and-forget notification to OpenClaw so it can track peer activity.
+ * Non-critical — failures are silently ignored.
+ */
+function notifyOpenClaw(text: string) {
+  try {
+    Bun.spawn(["openclaw", "system", "event", "--text", text, "--mode", "next-heartbeat"], {
+      stdio: ["ignore", "ignore", "ignore"],
+    }).unref();
+  } catch {
+    // OpenClaw may not be running — non-critical
+  }
+}
+
 // --- Utility ---
 
 function log(msg: string) {
@@ -340,6 +356,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       try {
         await brokerFetch("/set-summary", { id: myId, summary });
+        notifyOpenClaw(`Claude peer ${myId} summary: ${summary}`);
         return {
           content: [{ type: "text" as const, text: `Summary updated: "${summary}"` }],
         };
@@ -463,7 +480,7 @@ async function main() {
   log(`Git root: ${myGitRoot ?? "(none)"}`);
   log(`TTY: ${tty ?? "(unknown)"}`);
 
-  // 3. Generate initial summary via gpt-5.4-nano (non-blocking, best-effort)
+  // 3. Generate initial summary (non-blocking, best-effort)
   let initialSummary = "";
   const summaryPromise = (async () => {
     try {
@@ -497,6 +514,7 @@ async function main() {
   });
   myId = reg.id;
   log(`Registered as peer ${myId}`);
+  notifyOpenClaw(`Claude peer ${myId} registered in ${myCwd}${initialSummary ? ` — ${initialSummary}` : ""}`);
 
   // If summary generation is still running, update it when done
   if (!initialSummary) {
