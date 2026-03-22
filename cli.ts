@@ -19,6 +19,7 @@
 const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const BROKER_URL = process.env.CLAUDE_PEERS_URL ?? `http://127.0.0.1:${BROKER_PORT}`;
 const AUTH_TOKEN = process.env.CLAUDE_PEERS_TOKEN ?? "";
+const HOSTNAME = process.env.CLAUDE_PEERS_HOSTNAME ?? (await import("os")).hostname();
 
 async function brokerFetch<T>(path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
@@ -61,7 +62,7 @@ switch (cmd) {
           }>
         >("/list-peers", {
           scope: "network",
-          hostname: (await import("os")).hostname(),
+          hostname: HOSTNAME,
           cwd: "/",
           git_root: null,
         });
@@ -141,11 +142,17 @@ switch (cmd) {
   }
 
   case "kill-broker": {
+    // Only kill local brokers — can't signal remote processes
+    const brokerUrl = new URL(BROKER_URL);
+    if (brokerUrl.hostname !== "127.0.0.1" && brokerUrl.hostname !== "localhost") {
+      console.error(`Cannot kill remote broker at ${BROKER_URL}. Only local brokers can be stopped.`);
+      process.exit(1);
+    }
     try {
       const health = await brokerFetch<{ status: string; peers: number }>("/health");
       console.log(`Broker has ${health.peers} peer(s). Shutting down...`);
-      // Find and kill the broker process on the port
-      const proc = Bun.spawnSync(["lsof", "-ti", `:${BROKER_PORT}`]);
+      const port = brokerUrl.port || "7899";
+      const proc = Bun.spawnSync(["lsof", "-ti", `:${port}`]);
       const pids = new TextDecoder()
         .decode(proc.stdout)
         .trim()

@@ -115,18 +115,18 @@ The broker binds to localhost — all external traffic goes through pipelock.
 
 ### Docker Compose
 
+Use an internal network so only pipelock can reach the broker:
+
 ```yaml
 services:
   pipelock:
     image: ghcr.io/luckypipewrench/pipelock:latest
-    command:
-      - "run"
-      - "--listen=127.0.0.1:18888"
-      - "--reverse-proxy"
-      - "--reverse-upstream=http://broker:7899"
-      - "--reverse-listen=:8888"
+    command: ["run", "--listen=127.0.0.1:18888", "--reverse-proxy",
+      "--reverse-upstream=http://broker:7899", "--reverse-listen=:8888",
+      "--config=/etc/pipelock/pipelock.yaml"]
     ports:
       - "7899:8888"
+    networks: [public, internal]
     volumes:
       - ./pipelock.yaml:/etc/pipelock/pipelock.yaml:ro
   broker:
@@ -134,8 +134,12 @@ services:
     environment:
       CLAUDE_PEERS_HOST: "0.0.0.0"
       CLAUDE_PEERS_TOKEN: "${CLAUDE_PEERS_TOKEN}"
-    expose:
-      - "7899"
+    networks: [internal]  # Only reachable by pipelock
+
+networks:
+  public: {}
+  internal:
+    internal: true  # No external access
 ```
 
 ### Reverse Proxy Config

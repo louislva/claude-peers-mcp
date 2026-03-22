@@ -181,14 +181,8 @@ function handleRegister(body: RegisterRequest): RegisterResponse {
   const now = new Date().toISOString();
   const hostname = body.hostname || "localhost";
 
-  // Remove any existing registration for this PID + hostname combo (re-registration)
-  const existing = db
-    .query("SELECT id FROM peers WHERE pid = ? AND hostname = ?")
-    .get(body.pid, hostname) as { id: string } | null;
-  if (existing) {
-    deletePeer.run(existing.id);
-  }
-
+  // No dedup by pid/hostname — self-reported fields can collide across clients.
+  // Old registrations expire via heartbeat timeout (45s).
   insertPeer.run(id, body.pid, hostname, body.cwd, body.git_root, body.tty, body.summary, now, now);
   return { id };
 }
