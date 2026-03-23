@@ -208,6 +208,11 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
   return { ok: true };
 }
 
+function handlePeekMessages(body: PollMessagesRequest): PollMessagesResponse {
+  const messages = selectUndelivered.all(body.id) as Message[];
+  return { messages };
+}
+
 function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   const messages = selectUndelivered.all(body.id) as Message[];
 
@@ -255,6 +260,8 @@ Bun.serve({
           return Response.json(handleListPeers(body as ListPeersRequest));
         case "/send-message":
           return Response.json(handleSendMessage(body as SendMessageRequest));
+        case "/peek-messages":
+          return Response.json(handlePeekMessages(body as PollMessagesRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
         case "/unregister":
