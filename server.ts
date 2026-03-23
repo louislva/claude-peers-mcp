@@ -235,6 +235,39 @@ const TOOLS = [
   },
 ];
 
+// --- Piggyback delivery ---
+// Drain pending messages and return them as extra content items to append to any tool response.
+// This is the reliable delivery path when channels aren't available (e.g., Bedrock auth):
+// messages arrive automatically whenever Claude interacts with any claude-peers tool.
+
+async function drainPendingMessages(): Promise<Array<{ type: "text"; text: string }>> {
+  if (!myId) return [];
+
+  try {
+    const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+
+    for (const msg of result.messages) {
+      pushedMessageIds.delete(msg.id);
+    }
+
+    if (result.messages.length === 0) return [];
+
+    const lines = result.messages.map((m) => {
+      const parts = [`From ${m.from_id} (${m.sent_at}):\n${m.text}`];
+      return parts.join("");
+    });
+
+    return [
+      {
+        type: "text" as const,
+        text: `\n📨 ${result.messages.length} pending peer message(s):\n\n${lines.join("\n\n---\n\n")}\n\nIMPORTANT: Respond to these messages using send_message before continuing your current work.`,
+      },
+    ];
+  } catch {
+    return [];
+  }
+}
+
 // --- Tool handlers ---
 
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -262,6 +295,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
                 type: "text" as const,
                 text: `No other Claude Code instances found (scope: ${scope}).`,
               },
+              ...await drainPendingMessages(),
             ],
           };
         }
@@ -285,6 +319,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
               type: "text" as const,
               text: `Found ${peers.length} peer(s) (scope: ${scope}):\n\n${lines.join("\n\n")}`,
             },
+            ...await drainPendingMessages(),
           ],
         };
       } catch (e) {
@@ -321,7 +356,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           };
         }
         return {
-          content: [{ type: "text" as const, text: `Message sent to peer ${to_id}` }],
+          content: [
+            { type: "text" as const, text: `Message sent to peer ${to_id}` },
+            ...await drainPendingMessages(),
+          ],
         };
       } catch (e) {
         return {
@@ -347,7 +385,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       try {
         await brokerFetch("/set-summary", { id: myId, summary });
         return {
-          content: [{ type: "text" as const, text: `Summary updated: "${summary}"` }],
+          content: [
+            { type: "text" as const, text: `Summary updated: "${summary}"` },
+            ...await drainPendingMessages(),
+          ],
         };
       } catch (e) {
         return {
@@ -370,12 +411,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         };
       }
       try {
-        // /poll-messages marks messages as delivered — this is the authoritative delivery path.
-        // Channel notifications (from the poll loop) are best-effort and may be silently
-        // ignored if channels aren't enabled.
         const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
 
-        // Clear consumed IDs from the pushed set so they won't be re-pushed
         for (const msg of result.messages) {
           pushedMessageIds.delete(msg.id);
         }
