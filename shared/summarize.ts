@@ -2,21 +2,67 @@
  * Generate a 1-2 sentence summary of what a Claude Code instance is likely
  * working on, based on its working directory and git context.
  *
- * Uses OpenAI's gpt-5.4-nano for cheap, fast inference.
- * Requires OPENAI_API_KEY environment variable.
- * Falls back gracefully if unavailable.
+ * Uses OpenAI's chat completions API for cheap, fast inference.
+ * Token resolution order:
+ *   1. OPENAI_API_KEY environment variable
+ *   2. Codex CLI OAuth token (~/.codex/auth.json)
+ * Falls back gracefully if neither is available.
  */
+
+const DEFAULT_MODEL = "gpt-5.4-nano";
+const CODEX_AUTH_PATH = `${process.env.HOME ?? "~"}/.codex/auth.json`;
+
+interface CodexAuthFile {
+  auth_mode?: string;
+  tokens?: {
+    access_token?: string;
+    refresh_token?: string;
+    id_token?: string;
+  };
+}
+
+/**
+ * Attempt to read the Codex CLI OAuth access token from ~/.codex/auth.json.
+ * Returns null if the file doesn't exist or can't be parsed.
+ */
+async function getCodexOAuthToken(): Promise<string | null> {
+  try {
+    const file = Bun.file(CODEX_AUTH_PATH);
+    if (!(await file.exists())) {
+      return null;
+    }
+    const data: CodexAuthFile = await file.json();
+    return data.tokens?.access_token?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve an API bearer token from available sources.
+ * Priority: OPENAI_API_KEY env var > Codex CLI OAuth token.
+ */
+async function resolveApiToken(): Promise<string | null> {
+  const envKey = process.env.OPENAI_API_KEY;
+  if (envKey) {
+    return envKey;
+  }
+  return getCodexOAuthToken();
+}
 
 export async function generateSummary(context: {
   cwd: string;
   git_root: string | null;
   git_branch?: string | null;
   recent_files?: string[];
+  model?: string;
 }): Promise<string | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  const apiToken = await resolveApiToken();
+  if (!apiToken) {
     return null;
   }
+
+  const model = context.model ?? DEFAULT_MODEL;
 
   const parts = [`Working directory: ${context.cwd}`];
   if (context.git_root) {
@@ -34,10 +80,10 @@ export async function generateSummary(context: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiToken}`,
       },
       body: JSON.stringify({
-        model: "gpt-5.4-nano",
+        model,
         messages: [
           {
             role: "system",
