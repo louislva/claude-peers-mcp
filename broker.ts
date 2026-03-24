@@ -58,15 +58,25 @@ db.run(`
   )
 `);
 
-// Clean up stale peers (PIDs that no longer exist) on startup
+// Peers that haven't sent a heartbeat within this window are considered stale,
+// even if their PID is still alive (PID reuse by unrelated processes).
+const STALE_TIMEOUT_MS = 60_000;
+
+// Clean up stale peers (dead PIDs or missed heartbeats) on startup
 function cleanStalePeers() {
-  const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
+  const now = Date.now();
+  const peers = db.query("SELECT id, pid, last_seen FROM peers").all() as { id: string; pid: number; last_seen: string }[];
   for (const peer of peers) {
+    const lastSeen = new Date(peer.last_seen).getTime();
+    const isHeartbeatStale = now - lastSeen > STALE_TIMEOUT_MS;
+    let isPidDead = false;
     try {
-      // Check if process is still alive (signal 0 doesn't kill, just checks)
       process.kill(peer.pid, 0);
     } catch {
-      // Process doesn't exist, remove it
+      isPidDead = true;
+    }
+
+    if (isPidDead || isHeartbeatStale) {
       db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
       db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
     }
@@ -184,16 +194,23 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
     peers = peers.filter((p) => p.id !== body.exclude_id);
   }
 
-  // Verify each peer's process is still alive
+  // Verify each peer is still alive (PID exists AND heartbeat is recent)
+  const now = Date.now();
   return peers.filter((p) => {
+    const lastSeen = new Date(p.last_seen).getTime();
+    const isHeartbeatStale = now - lastSeen > STALE_TIMEOUT_MS;
+    let isPidDead = false;
     try {
       process.kill(p.pid, 0);
-      return true;
     } catch {
-      // Clean up dead peer
+      isPidDead = true;
+    }
+
+    if (isPidDead || isHeartbeatStale) {
       deletePeer.run(p.id);
       return false;
     }
+    return true;
   });
 }
 
