@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 03-decision-proxy-01-PLAN.md
-last_updated: "2026-03-25T17:37:30Z"
+stopped_at: Completed 03-decision-proxy-02-PLAN.md
+last_updated: "2026-03-25T17:46:33.428Z"
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 7
 ---
 
 # Project State
@@ -52,6 +52,7 @@ Plan: 2 of 2
 | Phase 02-executor-protocol P02 | 2 min | 1 tasks | 1 files |
 | Phase 02-executor-protocol P03 | 5 | 1 tasks | 1 files |
 | Phase 03-decision-proxy P01 | 1 min | 1 tasks | 1 files |
+| Phase 03-decision-proxy P02 | 3 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,9 @@ Recent decisions affecting current work:
 - [Phase 03-decision-proxy P01]: waitForAnswer ACKs stale discuss_answer messages (wrong phase_number) inline during polling to prevent accumulation
 - [Phase 03-decision-proxy P01]: pollForChoices does NOT ACK — proxy agent must call ackMessages after processing to ensure at-least-once delivery
 - [Phase 03-decision-proxy P01]: parseChoicePayload validates only the 4 required fields; phase_goal and context treated as optional
+- [Phase 03-decision-proxy P02]: gsd-proxy.md uses 'Decision proxy -- answering discuss-phase choices for autonomous runs' as exact summary string for orchestrator peer discovery
+- [Phase 03-decision-proxy P02]: Proxy ACKs discuss_choice immediately (before evaluation) to prevent re-delivery during ANSWERING state
+- [Phase 03-decision-proxy P02]: appendDecision called BEFORE sendAnswer in proxy protocol — audit trail written even if broker send fails
 
 ### Pending Todos
 
@@ -93,6 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T17:37:30Z
-Stopped at: Completed 03-decision-proxy-01-PLAN.md
+Last session: 2026-03-25T17:46:33.426Z
+Stopped at: Completed 03-decision-proxy-02-PLAN.md
 Resume file: None

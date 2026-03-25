@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation** - Shared type contracts and broker availability endpoint (completed 2026-03-25)
 - [x] **Phase 2: Executor Protocol** - Executor agent lifecycle, git setup, ACK/progress/completion/blocked/reclaim protocol (completed 2026-03-25)
-- [ ] **Phase 3: Decision Proxy** - Proxy agent persona, discuss_choice/discuss_answer protocol, DECISIONS.md logging
+- [x] **Phase 3: Decision Proxy** - Proxy agent persona, discuss_choice/discuss_answer protocol, DECISIONS.md logging (completed 2026-03-25)
 - [ ] **Phase 4: Orchestrator Workflow** - Full autonomous peers workflow: discovery, dependency analysis, wave dispatch, monitoring, death handling, fallback
 - [ ] **Phase 5: Runtime Module and Tests** - Extracted runtime module (Kahn's algorithm, wave polling), integration test coverage
 
@@ -61,7 +61,7 @@ Plans:
   3. Each `discuss_choice` payload includes prior decisions from the current autonomous run so the proxy can answer consistently
   4. Every proxy answer is appended to `.planning/DECISIONS.md` as a permanent audit trail
   5. If no proxy peer is reachable or the 60-second timeout elapses, the orchestrator uses the recommended default and continues
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 03-01-PLAN.md — Proxy helpers TypeScript module: all protocol functions (poll, parse, answer, append decision, orchestrator-side choice/wait/timeout)
 - [ ] 03-02-PLAN.md — Proxy agent markdown document + integration tests for all proxy helper functions
@@ -97,6 +97,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete   | 2026-03-25 |
 | 2. Executor Protocol | 3/3 | Complete   | 2026-03-25 |
-| 3. Decision Proxy | 1/2 | In Progress|  |
+| 3. Decision Proxy | 2/2 | Complete   | 2026-03-25 |
 | 4. Orchestrator Workflow | 0/TBD | Not started | - |
 | 5. Runtime Module and Tests | 0/TBD | Not started | - |
