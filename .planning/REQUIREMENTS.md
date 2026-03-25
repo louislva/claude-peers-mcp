@@ -9,14 +9,14 @@ Requirements for peer-aware autonomous workflow. Each maps to roadmap phases.
 
 ### Type System & Contracts
 
-- [ ] **TYPE-01**: Shared types define 9 new message type literals (execute_phase, phase_complete, phase_blocked, phase_progress, status_request, status_response, reclaim_task, discuss_choice, discuss_answer)
-- [ ] **TYPE-02**: Each message type has a typed payload interface with required fields
-- [ ] **TYPE-03**: Peer availability types define available/busy peer state with idle_since and current_task fields
+- [x] **TYPE-01**: Shared types define 9 new message type literals (execute_phase, phase_complete, phase_blocked, phase_progress, status_request, status_response, reclaim_task, discuss_choice, discuss_answer)
+- [x] **TYPE-02**: Each message type has a typed payload interface with required fields
+- [x] **TYPE-03**: Peer availability types define available/busy peer state with idle_since and current_task fields
 
 ### Broker Infrastructure
 
 - [ ] **BRKR-01**: `/peer-availability` endpoint returns available and busy peers in a single query (replaces 3 round trips)
-- [ ] **BRKR-02**: Task assignments support a `failed` terminal state that unblocks wave completion
+- [x] **BRKR-02**: Task assignments support a `failed` terminal state that unblocks wave completion
 - [ ] **BRKR-03**: Conflict-check covers lock files and auto-generated indexes, not just declared source files
 - [ ] **BRKR-04**: `/peer-availability` endpoint has integration test coverage
 
@@ -92,11 +92,11 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TYPE-01 | Phase 1 | Pending |
-| TYPE-02 | Phase 1 | Pending |
-| TYPE-03 | Phase 1 | Pending |
+| TYPE-01 | Phase 1 | Complete |
+| TYPE-02 | Phase 1 | Complete |
+| TYPE-03 | Phase 1 | Complete |
 | BRKR-01 | Phase 1 | Pending |
-| BRKR-02 | Phase 1 | Pending |
+| BRKR-02 | Phase 1 | Complete |
 | BRKR-03 | Phase 1 | Pending |
 | BRKR-04 | Phase 5 | Pending |
 | EXEC-01 | Phase 2 | Pending |
