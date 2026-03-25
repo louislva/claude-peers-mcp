@@ -45,7 +45,11 @@ Plans:
   3. Executor sends `phase_progress` messages (with `tasks_completed`, `tasks_total`, `last_commit`) after each task completes during execution
   4. Executor sends a structured `phase_complete` or `phase_blocked` message on exit — `phase_blocked` includes one of the seven defined reason categories
   5. Executor never writes to `ROADMAP.md` or `STATE.md` (enforced by `--no-transition` flag)
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 02-01-PLAN.md — Executor helpers TypeScript module: all protocol functions (ACK, setup, progress, complete, blocked, reclaim, push jitter, no-transition guard)
+- [ ] 02-02-PLAN.md — Executor agent markdown document: full lifecycle instructions for Claude instances
+- [ ] 02-03-PLAN.md — Integration tests for all executor helper functions
 
 ### Phase 3: Decision Proxy
 **Goal**: The decision proxy peer role is fully specified — a user-primed session can register as proxy, receive discuss-phase choices from the orchestrator, and respond consistently with logged decisions
@@ -89,7 +93,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete   | 2026-03-25 |
-| 2. Executor Protocol | 0/TBD | Not started | - |
+| 2. Executor Protocol | 0/3 | Not started | - |
 | 3. Decision Proxy | 0/TBD | Not started | - |
 | 4. Orchestrator Workflow | 0/TBD | Not started | - |
 | 5. Runtime Module and Tests | 0/TBD | Not started | - |
