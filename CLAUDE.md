@@ -4,7 +4,7 @@ globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
 alwaysApply: false
 ---
 
-# claude-peers
+# gsd-comms-mcp
 
 Peer discovery and messaging MCP channel for Claude Code instances.
 

@@ -1,5 +1,5 @@
 {
-  "name": "claude-peers",
+  "name": "gsd-comms-mcp",
   "version": "0.1.0",
   "description": "Peer discovery and messaging for Claude Code instances",
   "module": "index.ts",
