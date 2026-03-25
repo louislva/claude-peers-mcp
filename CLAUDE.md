@@ -10,11 +10,28 @@ Peer discovery and messaging MCP channel for Claude Code instances.
 
 ## Architecture
 
-- `broker.ts` — Singleton HTTP daemon on localhost:7899 + SQLite. Auto-launched by the MCP server.
-- `server.ts` — MCP stdio server, one per Claude Code instance. Connects to broker, exposes tools, pushes channel notifications.
-- `shared/types.ts` — Shared TypeScript types for broker API.
+- `broker.ts` — Singleton HTTP daemon on localhost:7899 + SQLite. Auto-launched by the MCP server. All state transitions are atomic SQLite transactions.
+- `server.ts` — MCP stdio server, one per Claude Code instance. Connects to broker, exposes tools, pushes channel notifications. ACK-based message delivery.
+- `shared/types.ts` — Shared TypeScript types for broker API (Peer, Message, Session, Wave, TaskAssignment).
 - `shared/summarize.ts` — Auto-summary generation via gpt-5.4-nano.
-- `cli.ts` — CLI utility for inspecting broker state.
+- `cli.ts` — CLI utility for inspecting broker state, monitoring DB, and maintenance.
+- `gsd-plugin/` — GSD integration: PostToolUse hook, peer coordinator agent, CLAUDE.md snippet.
+- `broker.test.ts` — 23 integration tests covering all endpoints.
+
+## Database
+
+All state lives in a single SQLite file (`~/.claude-peers.db`), shared across all sessions on the machine.
+
+**Tables:**
+- `peers` — Active Claude Code instances (cleaned on PID death)
+- `messages` — Inter-peer messages (ACK-based delivery, auto-pruned after 24h)
+- `sessions` — GSD hook session state (replaces temp files, auto-pruned after 7d)
+- `waves` — Orchestration wave tracking (auto-pruned after 30d)
+- `task_assignments` — Per-task state with file-conflict detection
+
+**Indexes:** Partial indexes on all hot query paths (poll, prune, conflict-check, PID lookup, session cleanup).
+
+**Retention:** Auto-prune every 5 min. Delivered messages: 24h. Completed sessions: 7d. Completed waves: 30d. WAL checkpoint every 2 min. All configurable via env vars.
 
 ## Running
 
@@ -26,11 +43,67 @@ claude --dangerously-load-development-channels server:claude-peers
 # { "claude-peers": { "command": "bun", "args": ["./server.ts"] } }
 
 # CLI:
-bun cli.ts status
-bun cli.ts peers
-bun cli.ts send <peer-id> <message>
-bun cli.ts kill-broker
+bun cli.ts status          # Broker status + active peers
+bun cli.ts peers           # List all peers
+bun cli.ts send <id> <msg> # Send a message to a peer
+bun cli.ts stats           # DB size, row counts, retention policy
+bun cli.ts prune           # Force cleanup + VACUUM to reclaim disk
+bun cli.ts db-path         # Print the database file path
+bun cli.ts kill-broker     # Stop the broker daemon
 ```
+
+## Broker API Endpoints
+
+### Core (peer lifecycle)
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/register` | Register a new peer (atomic: cleans old PID) |
+| POST | `/heartbeat` | Update peer's last_seen timestamp |
+| POST | `/set-summary` | Update peer's summary |
+| POST | `/list-peers` | List peers by scope (machine/directory/repo) |
+| POST | `/unregister` | Remove peer + all FK references (atomic) |
+
+### Messaging (ACK-based)
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/send-message` | Send message with optional `msg_type` + `payload` |
+| POST | `/poll-messages` | Get undelivered messages (does NOT mark delivered) |
+| POST | `/ack-message` | Mark message IDs as delivered |
+
+### Sessions (GSD hook)
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/session-heartbeat` | Atomic: register peer + upsert session + sync summary |
+| POST | `/session-status` | Get session state |
+| POST | `/session-end` | Mark session completed + clean peer |
+
+### Orchestration (waves + tasks)
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/wave-create` | Create wave + task assignments (atomic, idempotent) |
+| POST | `/wave-status` | Get wave + all task states |
+| POST | `/task-start` | Assign session to task (validates status + file conflicts) |
+| POST | `/task-complete` | Complete task (auto-completes wave if all done) |
+| POST | `/task-blocked` | Mark task blocked with reason |
+| POST | `/conflict-check` | Check file list against running tasks |
+
+### Monitoring + Maintenance
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/health` | Broker status + peer count |
+| GET | `/stats` | DB size, row counts, retention config, schema version |
+| POST | `/prune` | Trigger retention cleanup, returns pruned counts |
+| POST | `/vacuum` | WAL checkpoint + VACUUM to reclaim disk space |
+
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `CLAUDE_PEERS_PORT` | `7899` | Broker HTTP port |
+| `CLAUDE_PEERS_DB` | `~/.claude-peers.db` | SQLite database path |
+| `CLAUDE_PEERS_RETAIN_MESSAGES_MS` | `86400000` (24h) | Delivered message retention |
+| `CLAUDE_PEERS_RETAIN_SESSIONS_MS` | `604800000` (7d) | Completed session retention |
+| `CLAUDE_PEERS_RETAIN_WAVES_MS` | `2592000000` (30d) | Completed wave retention |
 
 ## Bun
 

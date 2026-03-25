@@ -12,13 +12,56 @@ export interface Peer {
   last_seen: string; // ISO timestamp
 }
 
+export type MessageType = "chat" | "task_complete" | "task_blocked" | "wave_advance" | "status_request" | "status_response";
+
 export interface Message {
   id: number;
   from_id: PeerId;
   to_id: PeerId;
   text: string;
+  msg_type: MessageType;
+  payload: string; // JSON string
   sent_at: string; // ISO timestamp
-  delivered: boolean;
+  delivered: number; // 0 = undelivered, 1 = delivered (SQLite INTEGER)
+  delivered_at: string | null;
+}
+
+export interface Session {
+  session_id: string;
+  peer_id: PeerId;
+  cwd: string;
+  git_root: string | null;
+  task_summary: string;
+  status: "active" | "stuck" | "completed";
+  registered_at: string;
+  last_tool_use: string;
+}
+
+export type WaveStatus = "pending" | "running" | "completed" | "failed";
+
+export interface Wave {
+  id: number;
+  repo: string;
+  phase: number;
+  wave_number: number;
+  status: WaveStatus;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export type TaskStatus = "pending" | "running" | "completed" | "failed" | "blocked";
+
+export interface TaskAssignment {
+  id: number;
+  wave_id: number;
+  session_id: string | null;
+  task_name: string;
+  files: string; // JSON array of file paths
+  status: TaskStatus;
+  blocked_by: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  error: string | null;
 }
 
 // --- Broker API types ---
@@ -56,6 +99,8 @@ export interface SendMessageRequest {
   from_id: PeerId;
   to_id: PeerId;
   text: string;
+  msg_type?: MessageType;
+  payload?: Record<string, unknown>;
 }
 
 export interface PollMessagesRequest {

@@ -8,6 +8,9 @@
  *   bun cli.ts status          — Show broker status and all peers
  *   bun cli.ts peers           — List all peers
  *   bun cli.ts send <id> <msg> — Send a message to a peer
+ *   bun cli.ts stats           — Show DB size, row counts, retention policy
+ *   bun cli.ts prune           — Manually trigger data retention cleanup
+ *   bun cli.ts db-path         — Print the database file path
  *   bun cli.ts kill-broker     — Stop the broker daemon
  */
 
@@ -129,6 +132,112 @@ switch (cmd) {
     break;
   }
 
+  case "stats": {
+    try {
+      const stats = await brokerFetch<{
+        db_path: string;
+        db_size_bytes: number;
+        db_size_human: string;
+        wal_size_bytes: number;
+        schema_version: number;
+        retention: {
+          messages_hours: number;
+          sessions_days: number;
+          waves_days: number;
+        };
+        counts: {
+          peers: number;
+          messages_total: number;
+          messages_undelivered: number;
+          messages_delivered: number;
+          sessions_active: number;
+          sessions_completed: number;
+          waves_total: number;
+          waves_running: number;
+          waves_completed: number;
+          tasks_total: number;
+          tasks_running: number;
+          tasks_completed: number;
+        };
+      }>("/stats");
+
+      console.log("=== claude-peers Database Stats ===\n");
+
+      console.log(`Database:  ${stats.db_path}`);
+      console.log(`Size:      ${stats.db_size_human} (db: ${formatBytes(stats.db_size_bytes)}, wal: ${formatBytes(stats.wal_size_bytes)})`);
+      console.log(`Schema:    v${stats.schema_version}`);
+
+      console.log(`\n--- Retention Policy ---`);
+      console.log(`Messages:  ${stats.retention.messages_hours}h (delivered)`);
+      console.log(`Sessions:  ${stats.retention.sessions_days}d (completed)`);
+      console.log(`Waves:     ${stats.retention.waves_days}d (completed/failed)`);
+
+      console.log(`\n--- Row Counts ---`);
+      console.log(`Peers:     ${stats.counts.peers} active`);
+      console.log(`Messages:  ${stats.counts.messages_total} total (${stats.counts.messages_undelivered} pending, ${stats.counts.messages_delivered} delivered)`);
+      console.log(`Sessions:  ${stats.counts.sessions_active} active, ${stats.counts.sessions_completed} completed`);
+      console.log(`Waves:     ${stats.counts.waves_total} total (${stats.counts.waves_running} running, ${stats.counts.waves_completed} done)`);
+      console.log(`Tasks:     ${stats.counts.tasks_total} total (${stats.counts.tasks_running} running, ${stats.counts.tasks_completed} done)`);
+
+      // Disk size warning
+      const totalBytes = stats.db_size_bytes + stats.wal_size_bytes;
+      if (totalBytes > 100 * 1024 * 1024) {
+        console.log(`\n!! WARNING: DB is over 100 MB. Run 'bun cli.ts prune' to clean up.`);
+      } else if (totalBytes > 50 * 1024 * 1024) {
+        console.log(`\n! Note: DB is over 50 MB. Consider running 'bun cli.ts prune'.`);
+      }
+    } catch {
+      // Broker not running — try to read DB directly
+      const dbPath = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+      try {
+        const file = Bun.file(dbPath);
+        const size = file.size;
+        console.log(`Broker is not running.`);
+        console.log(`Database: ${dbPath} (${formatBytes(size)})`);
+        console.log(`\nStart the broker to see full stats, or run 'bun cli.ts prune' after starting.`);
+      } catch {
+        console.log("Broker is not running and no database found.");
+      }
+    }
+    break;
+  }
+
+  case "prune": {
+    try {
+      const result = await brokerFetch<{
+        messages_pruned: number;
+        sessions_pruned: number;
+        waves_pruned: number;
+        tasks_pruned: number;
+      }>("/prune", {});
+
+      const total = result.messages_pruned + result.sessions_pruned + result.waves_pruned + result.tasks_pruned;
+      if (total === 0) {
+        console.log("Nothing to prune — all data is within retention limits.");
+      } else {
+        console.log("Pruned:");
+        if (result.messages_pruned > 0) console.log(`  ${result.messages_pruned} delivered message(s)`);
+        if (result.sessions_pruned > 0) console.log(`  ${result.sessions_pruned} completed session(s)`);
+        if (result.waves_pruned > 0) console.log(`  ${result.waves_pruned} completed wave(s)`);
+        if (result.tasks_pruned > 0) console.log(`  ${result.tasks_pruned} task assignment(s)`);
+      }
+
+      // VACUUM to reclaim disk space
+      console.log("\nRunning VACUUM to reclaim disk space...");
+      const vacuum = await brokerFetch<{ ok: boolean; size_before: string; size_after: string }>("/vacuum", {});
+      console.log(`Size: ${vacuum.size_before} -> ${vacuum.size_after}`);
+    } catch {
+      console.log("Broker is not running. Start it first to prune data.");
+    }
+    break;
+  }
+
+  case "db-path": {
+    const dbPath = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+    console.log(dbPath);
+    break;
+  }
+
   case "kill-broker": {
     try {
       const health = await brokerFetch<{ status: string; peers: number }>("/health");
@@ -157,5 +266,22 @@ Usage:
   bun cli.ts status          Show broker status and all peers
   bun cli.ts peers           List all peers
   bun cli.ts send <id> <msg> Send a message to a peer
-  bun cli.ts kill-broker     Stop the broker daemon`);
+  bun cli.ts stats           Show DB size, row counts, retention policy
+  bun cli.ts prune           Manually trigger data retention cleanup
+  bun cli.ts db-path         Print the database file path
+  bun cli.ts kill-broker     Stop the broker daemon
+
+Environment:
+  CLAUDE_PEERS_PORT              Broker port (default: 7899)
+  CLAUDE_PEERS_DB                Database path (default: ~/.claude-peers.db)
+  CLAUDE_PEERS_RETAIN_MESSAGES_MS  Message retention in ms (default: 86400000 = 24h)
+  CLAUDE_PEERS_RETAIN_SESSIONS_MS  Session retention in ms (default: 604800000 = 7d)
+  CLAUDE_PEERS_RETAIN_WAVES_MS     Wave retention in ms (default: 2592000000 = 30d)`);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }

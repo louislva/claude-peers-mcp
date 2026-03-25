@@ -138,6 +138,7 @@ function getTty(): string | null {
 let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
+const pendingAckIds = new Set<number>(); // Messages polled but not yet ACKed
 
 // --- MCP Server ---
 
@@ -407,24 +408,29 @@ async function pollAndPushMessages() {
   try {
     const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
 
-    for (const msg of result.messages) {
-      // Look up the sender's info for context
-      let fromSummary = "";
-      let fromCwd = "";
-      try {
-        const peers = await brokerFetch<Peer[]>("/list-peers", {
-          scope: "machine",
-          cwd: myCwd,
-          git_root: myGitRoot,
-        });
-        const sender = peers.find((p) => p.id === msg.from_id);
-        if (sender) {
-          fromSummary = sender.summary;
-          fromCwd = sender.cwd;
-        }
-      } catch {
-        // Non-critical, proceed without sender info
+    // Filter out messages already pending ACK (prevents duplicate notifications)
+    const newMessages = result.messages.filter((m) => !pendingAckIds.has(m.id));
+    if (newMessages.length === 0) return;
+
+    // Fetch peer list ONCE for all messages (not per-message)
+    let peerMap = new Map<string, { summary: string; cwd: string }>();
+    try {
+      const peers = await brokerFetch<Peer[]>("/list-peers", {
+        scope: "machine",
+        cwd: myCwd,
+        git_root: myGitRoot,
+      });
+      for (const p of peers) {
+        peerMap.set(p.id, { summary: p.summary, cwd: p.cwd });
       }
+    } catch {
+      // Non-critical, proceed without sender info
+    }
+
+    const ackedIds: number[] = [];
+
+    for (const msg of newMessages) {
+      const sender = peerMap.get(msg.from_id);
 
       // Push as channel notification — this is what makes it immediate
       await mcp.notification({
@@ -433,14 +439,30 @@ async function pollAndPushMessages() {
           content: msg.text,
           meta: {
             from_id: msg.from_id,
-            from_summary: fromSummary,
-            from_cwd: fromCwd,
+            from_summary: sender?.summary ?? "",
+            from_cwd: sender?.cwd ?? "",
             sent_at: msg.sent_at,
           },
         },
       });
 
+      ackedIds.push(msg.id);
       log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+    }
+
+    // Track pending ACKs to prevent duplicate notifications on next poll
+    for (const id of ackedIds) pendingAckIds.add(id);
+
+    // ACK delivered messages so they don't appear in future polls
+    if (ackedIds.length > 0) {
+      try {
+        await brokerFetch("/ack-message", { message_ids: ackedIds });
+        // Clear from dedup set after successful ACK
+        for (const id of ackedIds) pendingAckIds.delete(id);
+      } catch {
+        // Will retry on next poll cycle — messages stay in pendingAckIds
+        // to prevent duplicate notifications
+      }
     }
   } catch (e) {
     // Broker might be down temporarily, don't crash
