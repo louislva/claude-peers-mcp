@@ -219,6 +219,17 @@ describe("buildExecutionWaves", () => {
     expect(waves.length).toBe(1);
     expect(waves[0].map((p) => p.number)).toEqual([2]);
   });
+
+  test("all phases completed returns empty waves array", () => {
+    // All phases already done — nothing to schedule
+    const phases = [
+      makePhase(1, [], "completed"),
+      makePhase(2, [1], "completed"),
+      makePhase(3, [2], "completed"),
+    ];
+    const waves = helpers.buildExecutionWaves(phases);
+    expect(waves.length).toBe(0);
+  });
 });
 
 // ============================================================
@@ -237,6 +248,14 @@ describe("checkWaveConflicts", () => {
     dependencies: [],
     status: "pending",
     filesModified: files,
+  });
+
+  test("single phase input returns [[phase]] (no conflict check needed)", async () => {
+    const phases = [makePhase(1, ["src/a.ts", "src/b.ts"])];
+    const subWaves = await helpers.checkWaveConflicts(phases, "/repo");
+    expect(subWaves.length).toBe(1);
+    expect(subWaves[0].length).toBe(1);
+    expect(subWaves[0][0].number).toBe(1);
   });
 
   test("no conflicts returns single sub-wave with all phases", async () => {
@@ -363,7 +382,7 @@ describe("discoverPeers", () => {
 
   test("returns zero executors triggers sequential fallback consideration (ORCH-12)", async () => {
     // No peers registered — discoverPeers should return empty results
-    // This is the condition that triggers sequential fallback in the orchestrator agent
+    // ORCH-12: This is the condition that triggers sequential fallback in the orchestrator agent
     const selfId = "test-orch-fallback-trigger-" + Date.now();
     const result = await helpers.discoverPeers(selfId, "/no/such/repo");
     expect(result.executors.length).toBe(0);
@@ -485,6 +504,12 @@ describe("shouldDelegate", () => {
 
   test("returns true for a delegatable phase (3+ files, executor available, no conflicts, no checkpoint)", () => {
     const phase = makePhase(["a.ts", "b.ts", "c.ts"]);
+    expect(helpers.shouldDelegate(phase, 1, [], false)).toBe(true);
+  });
+
+  test("returns true for exactly 3 files (boundary condition)", () => {
+    // Exactly 3 files is the minimum threshold — should delegate
+    const phase = makePhase(["a.ts", "b.ts", "c.ts"]); // length === 3, not < 3
     expect(helpers.shouldDelegate(phase, 1, [], false)).toBe(true);
   });
 });
