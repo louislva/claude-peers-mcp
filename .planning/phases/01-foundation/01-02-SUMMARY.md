@@ -125,3 +125,13 @@ None - no external service configuration required.
 ---
 *Phase: 01-foundation*
 *Completed: 2026-03-25*
+
+## Self-Check: PASSED
+
+- FOUND: broker.ts
+- FOUND: broker.test.ts
+- FOUND: .planning/phases/01-foundation/01-02-SUMMARY.md
+- FOUND commit: 7b84e74 (feat: /peer-availability endpoint)
+- FOUND commit: 80f2db2 (feat: expanded conflict-check)
+- FOUND commit: d1b577a (feat: 7 new integration tests)
+- FOUND commit: f4dc34a (docs: plan metadata)
