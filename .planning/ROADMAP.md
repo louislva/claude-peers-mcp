@@ -45,7 +45,7 @@ Plans:
   3. Executor sends `phase_progress` messages (with `tasks_completed`, `tasks_total`, `last_commit`) after each task completes during execution
   4. Executor sends a structured `phase_complete` or `phase_blocked` message on exit — `phase_blocked` includes one of the seven defined reason categories
   5. Executor never writes to `ROADMAP.md` or `STATE.md` (enforced by `--no-transition` flag)
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 Plans:
 - [ ] 02-01-PLAN.md — Executor helpers TypeScript module: all protocol functions (ACK, setup, progress, complete, blocked, reclaim, push jitter, no-transition guard)
 - [ ] 02-02-PLAN.md — Executor agent markdown document: full lifecycle instructions for Claude instances
@@ -93,7 +93,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete   | 2026-03-25 |
-| 2. Executor Protocol | 1/3 | In Progress|  |
+| 2. Executor Protocol | 2/3 | In Progress|  |
 | 3. Decision Proxy | 0/TBD | Not started | - |
 | 4. Orchestrator Workflow | 0/TBD | Not started | - |
 | 5. Runtime Module and Tests | 0/TBD | Not started | - |

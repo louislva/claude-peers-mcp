@@ -49,6 +49,7 @@ Plan: 3 of 3
 | Phase 01-foundation P01 | 2 min | 2 tasks | 1 files |
 | Phase 01-foundation P02 | 4 min | 3 tasks | 2 files |
 | Phase 02-executor-protocol P01 | 5 min | 1 tasks | 1 files |
+| Phase 02-executor-protocol P02 | 2 min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,8 @@ Recent decisions affecting current work:
 - [Phase 02-executor-protocol P01]: gitPushWithJitter applies jitter twice (before first push and before retry) to spread concurrent executor pushes
 - [Phase 02-executor-protocol P01]: handleReclaim push is fire-and-forget — reclaim status response sent regardless of push result
 - [Phase 02-executor-protocol P01]: callTaskComplete returns full broker response including wave_completed flag for orchestrator handoff
+- [Phase 02-executor-protocol P02]: Executor doc uses imperative voice and delegates all broker/git calls to executor-helpers.ts by function name
+- [Phase 02-executor-protocol P02]: Sequential task processing mandated (no subagents) to preserve interrupt capability for status_request and reclaim_task
 
 ### Pending Todos
 
@@ -83,6 +86,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T17:06:00.000Z
-Stopped at: Completed 02-executor-protocol-01-PLAN.md
+Last session: 2026-03-25T17:01:41Z
+Stopped at: Completed 02-executor-protocol-02-PLAN.md
 Resume file: None
