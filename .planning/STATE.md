@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 04-orchestrator-workflow-04-PLAN.md
-last_updated: "2026-03-25T18:55:04.136Z"
+stopped_at: Completed 04-orchestrator-workflow-03-PLAN.md
+last_updated: "2026-03-25T18:56:23.864Z"
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 11
-  completed_plans: 10
+  completed_plans: 11
 ---
 
 # Project State
@@ -56,6 +56,7 @@ Plan: 1 of 4
 | Phase 04-orchestrator-workflow P01 | 15 | 2 tasks | 2 files |
 | Phase 04-orchestrator-workflow P02 | 9 | 3 tasks | 2 files |
 | Phase 04-orchestrator-workflow P04 | 2 | 1 tasks | 1 files |
+| Phase 04-orchestrator-workflow P03 | 2 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,9 @@ Recent decisions affecting current work:
 - [Phase 04-orchestrator-workflow]: shouldDelegate uses filesModified.length < 3 as proxy for 'fewer than 3 tasks' heuristic — avoids plan-file reads at dispatch time
 - [Phase 04-orchestrator-workflow]: ORCH-12 comment added to zero-peers test to explicitly link test intent to sequential fallback requirement
 - [Phase 04-orchestrator-workflow]: shouldDelegate boundary test at exactly 3 files confirms the inclusive lower bound (< 3 operator, not <= 3)
+- [Phase 04-orchestrator-workflow]: Planning is always sequential (orchestrator only) — concurrent planning causes dependency context loss
+- [Phase 04-orchestrator-workflow]: Executor owns /task-start transition — orchestrator anti-pattern documented in gsd-orchestrator.md
+- [Phase 04-orchestrator-workflow]: Sequential fallback (ORCH-12): zero executors AND no proxy triggers standard autonomous workflow with no orchestrator helpers
 
 ### Pending Todos
 
@@ -110,6 +114,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T18:55:04.134Z
-Stopped at: Completed 04-orchestrator-workflow-04-PLAN.md
+Last session: 2026-03-25T18:56:23.862Z
+Stopped at: Completed 04-orchestrator-workflow-03-PLAN.md
 Resume file: None
