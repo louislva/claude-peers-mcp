@@ -15,9 +15,9 @@ Requirements for peer-aware autonomous workflow. Each maps to roadmap phases.
 
 ### Broker Infrastructure
 
-- [ ] **BRKR-01**: `/peer-availability` endpoint returns available and busy peers in a single query (replaces 3 round trips)
+- [x] **BRKR-01**: `/peer-availability` endpoint returns available and busy peers in a single query (replaces 3 round trips)
 - [x] **BRKR-02**: Task assignments support a `failed` terminal state that unblocks wave completion
-- [ ] **BRKR-03**: Conflict-check covers lock files and auto-generated indexes, not just declared source files
+- [x] **BRKR-03**: Conflict-check covers lock files and auto-generated indexes, not just declared source files
 - [ ] **BRKR-04**: `/peer-availability` endpoint has integration test coverage
 
 ### Executor Protocol
@@ -95,9 +95,9 @@ Deferred to future release. Tracked but not in current roadmap.
 | TYPE-01 | Phase 1 | Complete |
 | TYPE-02 | Phase 1 | Complete |
 | TYPE-03 | Phase 1 | Complete |
-| BRKR-01 | Phase 1 | Pending |
+| BRKR-01 | Phase 1 | Complete |
 | BRKR-02 | Phase 1 | Complete |
-| BRKR-03 | Phase 1 | Pending |
+| BRKR-03 | Phase 1 | Complete |
 | BRKR-04 | Phase 5 | Pending |
 | EXEC-01 | Phase 2 | Pending |
 | EXEC-02 | Phase 2 | Pending |
