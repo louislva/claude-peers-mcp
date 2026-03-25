@@ -2,52 +2,31 @@
  * Generate a 1-2 sentence summary of what a Claude Code instance is likely
  * working on, based on its working directory and git context.
  *
- * Uses OpenAI's chat completions API for cheap, fast inference.
- * Token resolution order:
- *   1. OPENAI_API_KEY environment variable
- *   2. Codex CLI OAuth token (~/.codex/auth.json)
- * Falls back gracefully if neither is available.
+ * Uses Codex CLI (`codex exec`) for inference, leveraging the user's
+ * existing OAuth authentication from ~/.codex/auth.json.
+ * Falls back gracefully if Codex CLI is not available.
  */
 
-const DEFAULT_MODEL = "gpt-5.4-nano";
-const CODEX_AUTH_PATH = `${process.env.HOME ?? "~"}/.codex/auth.json`;
-
-interface CodexAuthFile {
-  auth_mode?: string;
-  tokens?: {
-    access_token?: string;
-    refresh_token?: string;
-    id_token?: string;
-  };
-}
+const DEFAULT_MODEL = "gpt-5.4-mini";
 
 /**
- * Attempt to read the Codex CLI OAuth access token from ~/.codex/auth.json.
- * Returns null if the file doesn't exist or can't be parsed.
+ * Find the codex CLI binary path.
  */
-async function getCodexOAuthToken(): Promise<string | null> {
+async function findCodexBinary(): Promise<string | null> {
   try {
-    const file = Bun.file(CODEX_AUTH_PATH);
-    if (!(await file.exists())) {
-      return null;
+    const proc = Bun.spawn(["which", "codex"], {
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const text = await new Response(proc.stdout).text();
+    const code = await proc.exited;
+    if (code === 0 && text.trim()) {
+      return text.trim();
     }
-    const data: CodexAuthFile = await file.json();
-    return data.tokens?.access_token?.trim() || null;
   } catch {
-    return null;
+    // codex not installed
   }
-}
-
-/**
- * Resolve an API bearer token from available sources.
- * Priority: OPENAI_API_KEY env var > Codex CLI OAuth token.
- */
-async function resolveApiToken(): Promise<string | null> {
-  const envKey = process.env.OPENAI_API_KEY;
-  if (envKey) {
-    return envKey;
-  }
-  return getCodexOAuthToken();
+  return null;
 }
 
 export async function generateSummary(context: {
@@ -57,8 +36,8 @@ export async function generateSummary(context: {
   recent_files?: string[];
   model?: string;
 }): Promise<string | null> {
-  const apiToken = await resolveApiToken();
-  if (!apiToken) {
+  const codexPath = await findCodexBinary();
+  if (!codexPath) {
     return null;
   }
 
@@ -75,40 +54,57 @@ export async function generateSummary(context: {
     parts.push(`Recently modified files: ${context.recent_files.join(", ")}`);
   }
 
-  try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiToken}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You generate brief summaries of what a developer is working on based on their project context. Respond with exactly 1-2 sentences, no more. Be specific about the project name and likely task.",
-          },
-          {
-            role: "user",
-            content: `Based on this context, what is this developer likely working on?\n\n${parts.join("\n")}`,
-          },
-        ],
-        max_tokens: 100,
-        temperature: 0.3,
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
+  const prompt = `You generate brief summaries of what a developer is working on based on their project context. Respond with exactly 1-2 sentences, no more. Be specific about the project name and likely task.\n\nBased on this context, what is this developer likely working on?\n\n${parts.join("\n")}`;
 
-    if (!res.ok) {
+  // Use a temp file for clean output (codex exec -o writes only the final message)
+  const outputFile = `/tmp/claude-peers-summary-${process.pid}-${Date.now()}.txt`;
+
+  try {
+    const proc = Bun.spawn(
+      [
+        codexPath,
+        "exec",
+        "--model", model,
+        "--sandbox", "read-only",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "-o", outputFile,
+        prompt,
+      ],
+      {
+        cwd: context.cwd,
+        stdout: "ignore",
+        stderr: "ignore",
+        env: { ...process.env },
+      }
+    );
+
+    const exited = await Promise.race([
+      proc.exited,
+      new Promise<number>((resolve) =>
+        setTimeout(() => {
+          proc.kill();
+          resolve(1);
+        }, 15000)
+      ),
+    ]);
+
+    if (exited !== 0) {
       return null;
     }
 
-    const data = (await res.json()) as {
-      choices: Array<{ message: { content: string } }>;
-    };
-    return data.choices[0]?.message?.content?.trim() ?? null;
+    const file = Bun.file(outputFile);
+    if (!(await file.exists())) {
+      return null;
+    }
+
+    const output = await file.text();
+    // Clean up temp file
+    try { await Bun.write(outputFile, ""); await file.delete?.(); } catch {}
+    try { const { unlink } = await import("node:fs/promises"); await unlink(outputFile); } catch {}
+
+    const trimmed = output.trim();
+    return trimmed || null;
   } catch {
     return null;
   }
