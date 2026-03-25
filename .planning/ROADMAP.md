@@ -13,7 +13,7 @@ This milestone adds peer-aware autonomous execution to the existing gsd-comms-mc
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation** - Shared type contracts and broker availability endpoint (completed 2026-03-25)
-- [ ] **Phase 2: Executor Protocol** - Executor agent lifecycle, git setup, ACK/progress/completion/blocked/reclaim protocol
+- [x] **Phase 2: Executor Protocol** - Executor agent lifecycle, git setup, ACK/progress/completion/blocked/reclaim protocol (completed 2026-03-25)
 - [ ] **Phase 3: Decision Proxy** - Proxy agent persona, discuss_choice/discuss_answer protocol, DECISIONS.md logging
 - [ ] **Phase 4: Orchestrator Workflow** - Full autonomous peers workflow: discovery, dependency analysis, wave dispatch, monitoring, death handling, fallback
 - [ ] **Phase 5: Runtime Module and Tests** - Extracted runtime module (Kahn's algorithm, wave polling), integration test coverage
@@ -45,7 +45,7 @@ Plans:
   3. Executor sends `phase_progress` messages (with `tasks_completed`, `tasks_total`, `last_commit`) after each task completes during execution
   4. Executor sends a structured `phase_complete` or `phase_blocked` message on exit — `phase_blocked` includes one of the seven defined reason categories
   5. Executor never writes to `ROADMAP.md` or `STATE.md` (enforced by `--no-transition` flag)
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 Plans:
 - [ ] 02-01-PLAN.md — Executor helpers TypeScript module: all protocol functions (ACK, setup, progress, complete, blocked, reclaim, push jitter, no-transition guard)
 - [ ] 02-02-PLAN.md — Executor agent markdown document: full lifecycle instructions for Claude instances
@@ -93,7 +93,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete   | 2026-03-25 |
-| 2. Executor Protocol | 2/3 | In Progress|  |
+| 2. Executor Protocol | 3/3 | Complete   | 2026-03-25 |
 | 3. Decision Proxy | 0/TBD | Not started | - |
 | 4. Orchestrator Workflow | 0/TBD | Not started | - |
 | 5. Runtime Module and Tests | 0/TBD | Not started | - |
