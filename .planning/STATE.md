@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 01-foundation-02-PLAN.md
-last_updated: "2026-03-25T16:41:30.967Z"
+stopped_at: Completed 02-executor-protocol-02-PLAN.md
+last_updated: "2026-03-25T17:01:41Z"
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 6
+  completed_plans: 4
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Multiple Claude Code instances can collaborate autonomously on GSD milestones without human intervention
-**Current focus:** Phase 01 — foundation
+**Current focus:** Phase 02 — executor-protocol
 
 ## Current Position
 
-Phase: 01 (foundation) — COMPLETED
-Plan: 2 of 2
+Phase: 02 (executor-protocol) — EXECUTING
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -48,6 +48,7 @@ Plan: 2 of 2
 *Updated after each plan completion*
 | Phase 01-foundation P01 | 2 min | 2 tasks | 1 files |
 | Phase 01-foundation P02 | 4 min | 3 tasks | 2 files |
+| Phase 02-executor-protocol P01 | 5 min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,10 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: PeerAvailabilityResponse groups by repo_peers + machine_peers for same-repo-first peer discovery
 - [Phase 01-foundation]: expandFilesForConflictCheck uses empty string dir prefix (not "./") for root-level files to ensure path consistency
 - [Phase 01-foundation]: Both sides of conflict-check comparison are expanded enabling implicit-conflict detection for barrel exports
+- [Phase 02-executor-protocol P01]: readProcessOutput reads proc stream after exited to avoid blocking; stdout pipe used for SHA capture in handleReclaim
+- [Phase 02-executor-protocol P01]: gitPushWithJitter applies jitter twice (before first push and before retry) to spread concurrent executor pushes
+- [Phase 02-executor-protocol P01]: handleReclaim push is fire-and-forget — reclaim status response sent regardless of push result
+- [Phase 02-executor-protocol P01]: callTaskComplete returns full broker response including wave_completed flag for orchestrator handoff
 
 ### Pending Todos
 
@@ -78,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T16:35:00.000Z
-Stopped at: Completed 01-foundation-02-PLAN.md
+Last session: 2026-03-25T17:06:00.000Z
+Stopped at: Completed 02-executor-protocol-01-PLAN.md
 Resume file: None

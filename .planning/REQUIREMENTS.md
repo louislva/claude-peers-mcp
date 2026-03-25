@@ -22,15 +22,15 @@ Requirements for peer-aware autonomous workflow. Each maps to roadmap phases.
 
 ### Executor Protocol
 
-- [ ] **EXEC-01**: Executor peer acknowledges `execute_phase` within 15 seconds or task is reclaimed
-- [ ] **EXEC-02**: Executor runs git pull, reads plan file, validates via conflict-check before starting execution
-- [ ] **EXEC-03**: Executor sends `phase_progress` after each task completion with tasks_completed, tasks_total, last_commit
-- [ ] **EXEC-04**: Executor sends `phase_complete` with verification result, commit list, and files_modified on completion
-- [ ] **EXEC-05**: Executor sends `phase_blocked` with categorized reason (git_conflict, file_conflict, plan_not_found, test_failure, dependency_missing, permission_denied, unknown)
-- [ ] **EXEC-06**: Executor responds to `status_request` immediately, interrupting current work
-- [ ] **EXEC-07**: Executor handles `reclaim_task` by committing WIP, pushing, and returning to idle
-- [ ] **EXEC-08**: Executor uses push jitter (random 0-3s delay) to avoid git push collisions between parallel peers
-- [ ] **EXEC-09**: Executor runs with `--no-transition` flag so it never modifies ROADMAP.md or STATE.md
+- [x] **EXEC-01**: Executor peer acknowledges `execute_phase` within 15 seconds or task is reclaimed
+- [x] **EXEC-02**: Executor runs git pull, reads plan file, validates via conflict-check before starting execution
+- [x] **EXEC-03**: Executor sends `phase_progress` after each task completion with tasks_completed, tasks_total, last_commit
+- [x] **EXEC-04**: Executor sends `phase_complete` with verification result, commit list, and files_modified on completion
+- [x] **EXEC-05**: Executor sends `phase_blocked` with categorized reason (git_conflict, file_conflict, plan_not_found, test_failure, dependency_missing, permission_denied, unknown)
+- [x] **EXEC-06**: Executor responds to `status_request` immediately, interrupting current work
+- [x] **EXEC-07**: Executor handles `reclaim_task` by committing WIP, pushing, and returning to idle
+- [x] **EXEC-08**: Executor uses push jitter (random 0-3s delay) to avoid git push collisions between parallel peers
+- [x] **EXEC-09**: Executor runs with `--no-transition` flag so it never modifies ROADMAP.md or STATE.md
 
 ### Decision Proxy
 
@@ -99,15 +99,15 @@ Deferred to future release. Tracked but not in current roadmap.
 | BRKR-02 | Phase 1 | Complete |
 | BRKR-03 | Phase 1 | Complete |
 | BRKR-04 | Phase 5 | Pending |
-| EXEC-01 | Phase 2 | Pending |
-| EXEC-02 | Phase 2 | Pending |
-| EXEC-03 | Phase 2 | Pending |
-| EXEC-04 | Phase 2 | Pending |
-| EXEC-05 | Phase 2 | Pending |
-| EXEC-06 | Phase 2 | Pending |
-| EXEC-07 | Phase 2 | Pending |
-| EXEC-08 | Phase 2 | Pending |
-| EXEC-09 | Phase 2 | Pending |
+| EXEC-01 | Phase 2 | Complete |
+| EXEC-02 | Phase 2 | Complete |
+| EXEC-03 | Phase 2 | Complete |
+| EXEC-04 | Phase 2 | Complete |
+| EXEC-05 | Phase 2 | Complete |
+| EXEC-06 | Phase 2 | Complete |
+| EXEC-07 | Phase 2 | Complete |
+| EXEC-08 | Phase 2 | Complete |
+| EXEC-09 | Phase 2 | Complete |
 | PRXY-01 | Phase 3 | Pending |
 | PRXY-02 | Phase 3 | Pending |
 | PRXY-03 | Phase 3 | Pending |
