@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A peer discovery and messaging layer for Claude Code instances, designed to work alongside GSD v1. Enables multiple running Claude sessions to find each other, communicate in real-time, and coordinate work — replacing the isolated single-session model with collaborative multi-agent execution.
+A peer discovery, messaging, and autonomous coordination layer for Claude Code instances. Enables multiple running Claude sessions to find each other, communicate in real-time, and collaboratively execute GSD milestones in parallel — with orchestration, decision proxying, and failure recovery built in.
 
 ## Core Value
 
@@ -22,17 +22,19 @@ Multiple Claude Code instances can collaborate autonomously on GSD milestones wi
 - Session tracking via PostToolUse hook (`/session-heartbeat`)
 - GSD plugin with peer coordinator agent
 - CLI for broker inspection and maintenance
+- ✓ Shared type contracts (13 message types, 9 payload interfaces, peer availability types) — v1.0
+- ✓ `/peer-availability` endpoint (single-call peer discovery replacing 3 round trips) — v1.0
+- ✓ Expanded conflict-check (lock files, auto-generated indexes) — v1.0
+- ✓ Executor protocol (ACK, git setup, progress, completion, blocked, reclaim, push jitter) — v1.0
+- ✓ Decision proxy (discuss_choice/answer, prior decisions, DECISIONS.md audit trail, 60s timeout) — v1.0
+- ✓ Orchestrator workflow (Kahn's dependency graph, wave dispatch, monitoring, death recovery, sequential fallback) — v1.0
+- ✓ Standalone runtime module (extracted topological sort + wave polling) — v1.0
 
 ### Active
 
 <!-- Current scope. Building toward these. -->
 
-- [x] Peer-aware autonomous wrapper workflow — Validated in Phase 4: Orchestrator Workflow
-- [x] Decision proxy peer for unattended discuss-phase choices — Validated in Phase 3: Decision Proxy
-- [x] Parallel phase execution with dependency analysis — Validated in Phase 4: Orchestrator Workflow
-- [x] New broker endpoint: `/peer-availability` — Validated in Phase 1: Foundation
-- [x] Executor protocol (receive plan, execute, report, handle blocks) — Validated in Phase 2: Executor Protocol
-- [x] Error recovery (death handling, task reclaim, conflict resolution) — Validated in Phase 4: Orchestrator Workflow
+(None — next milestone not yet planned)
 
 ### Out of Scope
 
@@ -42,6 +44,9 @@ Multiple Claude Code instances can collaborate autonomously on GSD milestones wi
 - Cross-machine peer discovery — localhost only for now
 - Web UI dashboard — CLI and peer messaging are sufficient
 - Persistent decision proxy memory — proxy is primed per-session, not stored
+- Git worktree isolation per executor — v2 enhancement (RSLN-01)
+- Progress-monotonicity stuck detection — v2 enhancement (RSLN-02)
+- Real-time dashboard — v2 enhancement (OBSV-01)
 
 ## Context
 
@@ -50,7 +55,8 @@ Multiple Claude Code instances can collaborate autonomously on GSD milestones wi
 - MCP server per Claude session, stdio transport
 - Channel protocol for instant message delivery
 - Design document co-authored by Sam and Mike (two Claude peers) at `design-peer-autonomous.md`
-- Existing gsd-plugin provides PostToolUse hook and peer coordinator agent
+- Shipped v1.0 with 6,061 LOC TypeScript, 99 integration tests across 4 test files
+- GSD plugin: executor, proxy, and orchestrator agent docs + helpers + workflows
 
 ## Constraints
 
@@ -63,11 +69,19 @@ Multiple Claude Code instances can collaborate autonomously on GSD milestones wi
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Separate wrapper, not GSD fork | Keep GSD upgradeable, reduce blast radius | -- Pending |
-| One planner, many executors | Avoid race conditions on shared state (ROADMAP.md, STATE.md) | -- Pending |
-| Decision proxy as dedicated peer role | Separates "understanding the user" from "planning/coordinating" | -- Pending |
-| Single branch per wave | Simpler than per-executor branches, conflict-check prevents file overlap | -- Pending |
-| Filesystem-first context handoff | Executors read plan files from git, no large message payloads | -- Pending |
+| Separate wrapper, not GSD fork | Keep GSD upgradeable, reduce blast radius | ✓ Good — clean separation maintained |
+| One planner, many executors | Avoid race conditions on shared state (ROADMAP.md, STATE.md) | ✓ Good — orchestrator plans sequentially, dispatches in parallel |
+| Decision proxy as dedicated peer role | Separates "understanding the user" from "planning/coordinating" | ✓ Good — proxy stays available, never assigned execution work |
+| Single branch per wave | Simpler than per-executor branches, conflict-check prevents file overlap | ✓ Good — push jitter + conflict-check sufficient for v1 |
+| Filesystem-first context handoff | Executors read plan files from git, no large message payloads | ✓ Good — keeps message payloads small, git is source of truth |
+| Per-module brokerFetch duplication | Each helper module is self-contained, no cross-module imports | ✓ Good — prevents circular imports between executor/proxy/orchestrator |
+| Local file-overlap matrix for conflict serialization | Static planning-time check, not runtime broker call | ✓ Good — no broker dependency during wave grouping |
+
+## Known Tech Debt (from v1.0)
+
+- `reclaimExecutorTask` passes `error` key to `/task-blocked` but broker expects `reason` — reclaim audit trail stores NULL
+- Nyquist validation not formally signed off on any phase (VALIDATION.md exists but `nyquist_compliant: false`)
+- No VALIDATION.md for Phase 1
 
 ---
-*Last updated: 2026-03-25 after Phase 5 (Runtime Module and Tests) complete — all v1.0 milestone phases done*
+*Last updated: 2026-03-25 after v1.0 milestone*
