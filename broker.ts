@@ -21,6 +21,10 @@ import type {
   PollMessagesResponse,
   Peer,
   Message,
+  PeerAvailabilityRequest,
+  PeerAvailabilityResponse,
+  AvailablePeer,
+  BusyPeer,
 } from "./shared/types.ts";
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
@@ -220,6 +224,17 @@ const updateTaskStatus = db.prepare(`
 
 const assignTaskSession = db.prepare(`
   UPDATE task_assignments SET session_id = ? WHERE id = ?
+`);
+
+// Peer availability: LEFT JOIN to get running task info in one query
+const selectPeersWithTaskState = db.prepare(`
+  SELECT
+    p.id, p.pid, p.cwd, p.git_root, p.summary, p.last_seen,
+    ta.task_name AS current_task,
+    ta.started_at AS task_started_at
+  FROM peers p
+  LEFT JOIN sessions s ON s.peer_id = p.id AND s.status = 'active'
+  LEFT JOIN task_assignments ta ON ta.session_id = s.session_id AND ta.status = 'running'
 `);
 
 // --- Shared cleanup helper (used inside transactions) ---
@@ -691,6 +706,64 @@ function handleTaskBlocked(body: { task_id: number; reason: string }): { ok: boo
   return taskBlockedTxn(body.task_id, body.reason);
 }
 
+function handlePeerAvailability(body: PeerAvailabilityRequest): PeerAvailabilityResponse {
+  const rows = selectPeersWithTaskState.all() as Array<{
+    id: string;
+    pid: number;
+    cwd: string;
+    git_root: string | null;
+    summary: string;
+    last_seen: string;
+    current_task: string | null;
+    task_started_at: string | null;
+  }>;
+
+  const repoAvailable: AvailablePeer[] = [];
+  const repoBusy: BusyPeer[] = [];
+  const machineAvailable: AvailablePeer[] = [];
+  const machineBusy: BusyPeer[] = [];
+
+  for (const row of rows) {
+    // Skip the requesting peer
+    if (body.exclude_id && row.id === body.exclude_id) continue;
+
+    // Verify PID is still alive
+    try { process.kill(row.pid, 0); } catch { continue; }
+
+    const isRepoPeer = row.git_root === body.repo;
+
+    if (row.current_task && row.task_started_at) {
+      const busy: BusyPeer = {
+        id: row.id,
+        pid: row.pid,
+        cwd: row.cwd,
+        git_root: row.git_root,
+        summary: row.summary,
+        current_task: row.current_task,
+        task_started_at: row.task_started_at,
+      };
+      if (isRepoPeer) repoBusy.push(busy);
+      else machineBusy.push(busy);
+    } else {
+      const available: AvailablePeer = {
+        id: row.id,
+        pid: row.pid,
+        cwd: row.cwd,
+        git_root: row.git_root,
+        summary: row.summary,
+        idle_since: row.last_seen,
+      };
+      if (isRepoPeer) repoAvailable.push(available);
+      else machineAvailable.push(available);
+    }
+  }
+
+  return {
+    repo_peers: { available: repoAvailable, busy: repoBusy },
+    machine_peers: { available: machineAvailable, busy: machineBusy },
+  };
+}
+
 function handleConflictCheck(body: { wave_id: number; files: string[] }): { conflicts: { task_id: number; task_name: string; conflicting_files: string[] }[] } {
   const runningTasks = db.query(
     "SELECT id, files, task_name FROM task_assignments WHERE wave_id = ? AND status = 'running'"
@@ -783,6 +856,8 @@ Bun.serve({
           return Response.json(handleTaskBlocked(body as { task_id: number; reason: string }));
         case "/conflict-check":
           return Response.json(handleConflictCheck(body as { wave_id: number; files: string[] }));
+        case "/peer-availability":
+          return Response.json(handlePeerAvailability(body as PeerAvailabilityRequest));
 
         // --- Message ACK ---
         case "/ack-message":
