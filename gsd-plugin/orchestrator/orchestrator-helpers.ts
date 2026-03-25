@@ -634,3 +634,182 @@ export function shouldDelegate(
   if (hasHumanCheckpoint) return false;
   return true;
 }
+
+/**
+ * ORCH-09: Detect whether an executor left partial work behind before dying.
+ *
+ * Scans recent git commits to find any commits that reference the task or phase.
+ * The orchestrator agent uses the result to decide whether to:
+ * - Complete locally (hasPartialWork = true, lastCommit is a usable SHA)
+ * - Reassign from scratch (hasPartialWork = false)
+ *
+ * @param taskId - The task ID (used as a search hint in commit messages)
+ * @param gitRoot - Git root directory
+ * @returns { hasPartialWork, lastCommit }
+ */
+export async function handleExecutorDeath(
+  taskId: number,
+  gitRoot: string
+): Promise<{ hasPartialWork: boolean; lastCommit: string | null }> {
+  const proc = Bun.spawn(["git", "log", "--oneline", "-5"], {
+    cwd: gitRoot,
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  await proc.exited;
+
+  const output = await new Response(proc.stdout).text();
+  const lines = output.trim().split("\n").filter(Boolean);
+
+  if (lines.length === 0) {
+    return { hasPartialWork: false, lastCommit: null };
+  }
+
+  // Look for any commit mentioning the task id or a feat/fix commit (indicates executor work)
+  const taskPattern = new RegExp(`task[_-]?${taskId}|phase`, "i");
+  const hasPartialWork = lines.some((line) => taskPattern.test(line));
+  const lastCommit = lines[0]?.split(" ")[0] ?? null;
+
+  return { hasPartialWork, lastCommit };
+}
+
+/**
+ * ORCH-10: Sync the local git state after a wave completes.
+ *
+ * - Runs `git pull --rebase` to incorporate executor commits
+ * - Re-reads ROADMAP.md from disk (executors may have updated it)
+ * - Refreshes peer availability via discoverPeers
+ *
+ * @param myId - Orchestrator peer ID
+ * @param gitRoot - Git root directory
+ * @returns { roadmapContent, peers }
+ */
+export async function postWaveSync(
+  myId: PeerId,
+  gitRoot: string
+): Promise<{ roadmapContent: string; peers: { proxy: AvailablePeer | null; executors: AvailablePeer[] } }> {
+  // Pull latest executor commits
+  const pullProc = Bun.spawn(["git", "pull", "--rebase"], {
+    cwd: gitRoot,
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  await pullProc.exited;
+
+  // Re-read ROADMAP.md from disk
+  const roadmapPath = join(gitRoot, ".planning/ROADMAP.md");
+  const roadmapContent = await Bun.file(roadmapPath).text();
+
+  // Refresh peer list
+  const peers = await discoverPeers(myId, gitRoot);
+
+  return { roadmapContent, peers };
+}
+
+/**
+ * ORCH-07: Wait for all tasks in a wave to complete, monitoring for stale executors.
+ *
+ * Poll loop (10s interval):
+ * 1. Drain message queue FIRST (phase_progress, phase_complete, phase_blocked, status_response)
+ * 2. ACK all processed messages immediately
+ * 3. Check /wave-status — exit loop if wave.status is "completed" or "failed"
+ * 4. For each running task with no progress for 120s:
+ *    - Send status_request (first time)
+ *    - If status_request was sent 30s ago with no response: reclaim the task
+ *
+ * @param myId - Orchestrator peer ID
+ * @param waveId - The wave to monitor
+ * @param assignments - Map of taskId -> executorId (for reclaim targeting)
+ * @returns { completed, blocked, reclaimed }
+ */
+export async function waitForWaveComplete(
+  myId: PeerId,
+  waveId: number,
+  assignments: Map<number, PeerId>
+): Promise<{ completed: PhaseCompletePayload[]; blocked: PhaseBlockedPayload[]; reclaimed: number[] }> {
+  const POLL_INTERVAL_MS = 10_000;
+  const STALE_THRESHOLD_MS = 120_000;
+  const RECLAIM_WINDOW_MS = 30_000;
+
+  const progressTimestamps = new Map<number, number>(); // taskId -> last progress epoch ms
+  const statusRequestSent = new Map<number, number>(); // taskId -> when status_request was sent
+  const completed: PhaseCompletePayload[] = [];
+  const blocked: PhaseBlockedPayload[] = [];
+  const reclaimed: number[] = [];
+
+  // Initialize all assigned tasks with current timestamp
+  const now = Date.now();
+  for (const taskId of assignments.keys()) {
+    progressTimestamps.set(taskId, now);
+  }
+
+  while (true) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+    // 1. Drain message queue FIRST (per pitfall 3 — drain before checking timestamps)
+    const msgs = await pollOrchestratorMessages(myId);
+    const toAck: number[] = [];
+
+    for (const { msgId, payload } of msgs.progresses) {
+      progressTimestamps.set(payload.task_id, Date.now());
+      toAck.push(msgId);
+    }
+    for (const { msgId, payload } of msgs.completions) {
+      completed.push(payload);
+      toAck.push(msgId);
+    }
+    for (const { msgId, payload } of msgs.blocks) {
+      blocked.push(payload);
+      toAck.push(msgId);
+    }
+    for (const { msgId, payload } of msgs.statusResponses) {
+      statusRequestSent.delete(payload.task_id);
+      progressTimestamps.set(payload.task_id, Date.now());
+      toAck.push(msgId);
+    }
+
+    // ACK all processed messages
+    await ackMessages(toAck);
+
+    // 2. Check wave-level status
+    const waveStatusResult = await brokerFetch<{ wave: Wave; tasks: TaskAssignment[] }>(
+      "/wave-status",
+      { wave_id: waveId }
+    );
+    const { wave, tasks } = waveStatusResult;
+
+    if (wave.status === "completed" || wave.status === "failed") {
+      break;
+    }
+
+    // 3. Stale executor detection — check running tasks only
+    const currentTime = Date.now();
+    for (const task of tasks) {
+      if (task.status !== "running") continue;
+      const taskId = task.id;
+      const executorId = assignments.get(taskId);
+      if (!executorId) continue;
+
+      const lastProgress = progressTimestamps.get(taskId) ?? currentTime;
+      const timeSinceProgress = currentTime - lastProgress;
+
+      if (timeSinceProgress > STALE_THRESHOLD_MS) {
+        const sentTime = statusRequestSent.get(taskId);
+        if (sentTime !== undefined && currentTime - sentTime > RECLAIM_WINDOW_MS) {
+          // Status request sent, no response within 30s — reclaim
+          await reclaimExecutorTask(myId, executorId, taskId, waveId, "no response to status_request");
+          reclaimed.push(taskId);
+          statusRequestSent.delete(taskId);
+          progressTimestamps.delete(taskId);
+        } else if (sentTime === undefined) {
+          // First time seeing stale — send status request
+          await sendStatusRequest(myId, executorId, taskId);
+          statusRequestSent.set(taskId, currentTime);
+        }
+        // else: waiting for response, do nothing
+      }
+    }
+  }
+
+  return { completed, blocked, reclaimed };
+}
