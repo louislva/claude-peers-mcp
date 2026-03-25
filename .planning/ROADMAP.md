@@ -30,7 +30,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. `POST /peer-availability` returns available and busy peers in a single broker round trip, replacing three separate calls
   4. `POST /task-complete` and wave-status logic recognize a `failed` terminal state that unblocks wave completion
   5. `/conflict-check` payload accepts and evaluates lock files and auto-generated index files, not only declared source files
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 01-01-PLAN.md — Type contracts: 9 autonomous message types, payload interfaces, peer availability types, BRKR-02 verification
+- [ ] 01-02-PLAN.md — Broker endpoints: /peer-availability endpoint, expanded conflict-check, integration tests
 
 ### Phase 2: Executor Protocol
 **Goal**: The executor agent contract is fully specified — a peer running as executor knows exactly what to do from receiving `execute_phase` through sending `phase_complete` or `phase_blocked`, including git setup, security validation, and reclaim handling
@@ -85,7 +88,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/TBD | Not started | - |
+| 1. Foundation | 0/2 | Planning | - |
 | 2. Executor Protocol | 0/TBD | Not started | - |
 | 3. Decision Proxy | 0/TBD | Not started | - |
 | 4. Orchestrator Workflow | 0/TBD | Not started | - |
