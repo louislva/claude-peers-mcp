@@ -92,46 +92,46 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TYPE-01 | -- | Pending |
-| TYPE-02 | -- | Pending |
-| TYPE-03 | -- | Pending |
-| BRKR-01 | -- | Pending |
-| BRKR-02 | -- | Pending |
-| BRKR-03 | -- | Pending |
-| BRKR-04 | -- | Pending |
-| EXEC-01 | -- | Pending |
-| EXEC-02 | -- | Pending |
-| EXEC-03 | -- | Pending |
-| EXEC-04 | -- | Pending |
-| EXEC-05 | -- | Pending |
-| EXEC-06 | -- | Pending |
-| EXEC-07 | -- | Pending |
-| EXEC-08 | -- | Pending |
-| EXEC-09 | -- | Pending |
-| PRXY-01 | -- | Pending |
-| PRXY-02 | -- | Pending |
-| PRXY-03 | -- | Pending |
-| PRXY-04 | -- | Pending |
-| PRXY-05 | -- | Pending |
-| ORCH-01 | -- | Pending |
-| ORCH-02 | -- | Pending |
-| ORCH-03 | -- | Pending |
-| ORCH-04 | -- | Pending |
-| ORCH-05 | -- | Pending |
-| ORCH-06 | -- | Pending |
-| ORCH-07 | -- | Pending |
-| ORCH-08 | -- | Pending |
-| ORCH-09 | -- | Pending |
-| ORCH-10 | -- | Pending |
-| ORCH-11 | -- | Pending |
-| ORCH-12 | -- | Pending |
-| ORCH-13 | -- | Pending |
+| TYPE-01 | Phase 1 | Pending |
+| TYPE-02 | Phase 1 | Pending |
+| TYPE-03 | Phase 1 | Pending |
+| BRKR-01 | Phase 1 | Pending |
+| BRKR-02 | Phase 1 | Pending |
+| BRKR-03 | Phase 1 | Pending |
+| BRKR-04 | Phase 5 | Pending |
+| EXEC-01 | Phase 2 | Pending |
+| EXEC-02 | Phase 2 | Pending |
+| EXEC-03 | Phase 2 | Pending |
+| EXEC-04 | Phase 2 | Pending |
+| EXEC-05 | Phase 2 | Pending |
+| EXEC-06 | Phase 2 | Pending |
+| EXEC-07 | Phase 2 | Pending |
+| EXEC-08 | Phase 2 | Pending |
+| EXEC-09 | Phase 2 | Pending |
+| PRXY-01 | Phase 3 | Pending |
+| PRXY-02 | Phase 3 | Pending |
+| PRXY-03 | Phase 3 | Pending |
+| PRXY-04 | Phase 3 | Pending |
+| PRXY-05 | Phase 3 | Pending |
+| ORCH-01 | Phase 4 | Pending |
+| ORCH-02 | Phase 4 | Pending |
+| ORCH-03 | Phase 4 | Pending |
+| ORCH-04 | Phase 4 | Pending |
+| ORCH-05 | Phase 4 | Pending |
+| ORCH-06 | Phase 4 | Pending |
+| ORCH-07 | Phase 4 | Pending |
+| ORCH-08 | Phase 4 | Pending |
+| ORCH-09 | Phase 4 | Pending |
+| ORCH-10 | Phase 4 | Pending |
+| ORCH-11 | Phase 4 | Pending |
+| ORCH-12 | Phase 4 | Pending |
+| ORCH-13 | Phase 4 | Pending |
 
 **Coverage:**
 - v1.0 requirements: 34 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 34
+- Mapped to phases: 34
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-25*
-*Last updated: 2026-03-25 after initial definition*
+*Last updated: 2026-03-25 after roadmap creation — all 34 requirements mapped*
