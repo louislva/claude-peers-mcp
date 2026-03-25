@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-executor-protocol-03-PLAN.md
-last_updated: "2026-03-25T17:15:27.275Z"
+stopped_at: Completed 03-decision-proxy-01-PLAN.md
+last_updated: "2026-03-25T17:37:30Z"
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 5
+  total_plans: 7
   completed_plans: 5
 ---
 
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Multiple Claude Code instances can collaborate autonomously on GSD milestones without human intervention
-**Current focus:** Phase 02 — executor-protocol
+**Current focus:** Phase 03 — decision-proxy
 
 ## Current Position
 
-Phase: 02 (executor-protocol) — EXECUTING
-Plan: 3 of 3
+Phase: 03 (decision-proxy) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -51,6 +51,7 @@ Plan: 3 of 3
 | Phase 02-executor-protocol P01 | 5 min | 1 tasks | 1 files |
 | Phase 02-executor-protocol P02 | 2 min | 1 tasks | 1 files |
 | Phase 02-executor-protocol P03 | 5 | 1 tasks | 1 files |
+| Phase 03-decision-proxy P01 | 1 min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,9 @@ Recent decisions affecting current work:
 - [Phase 02-executor-protocol P02]: Sequential task processing mandated (no subagents) to preserve interrupt capability for status_request and reclaim_task
 - [Phase 02-executor-protocol]: Dynamic import in beforeAll used so CLAUDE_PEERS_PORT env override takes effect before module-level BROKER_URL constant is evaluated
 - [Phase 02-executor-protocol]: handleReclaim test uses /tmp (non-git dir) to verify fire-and-forget git failure path while confirming status message always sent
+- [Phase 03-decision-proxy P01]: waitForAnswer ACKs stale discuss_answer messages (wrong phase_number) inline during polling to prevent accumulation
+- [Phase 03-decision-proxy P01]: pollForChoices does NOT ACK — proxy agent must call ackMessages after processing to ensure at-least-once delivery
+- [Phase 03-decision-proxy P01]: parseChoicePayload validates only the 4 required fields; phase_goal and context treated as optional
 
 ### Pending Todos
 
@@ -89,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T17:11:36.198Z
-Stopped at: Completed 02-executor-protocol-03-PLAN.md
+Last session: 2026-03-25T17:37:30Z
+Stopped at: Completed 03-decision-proxy-01-PLAN.md
 Resume file: None

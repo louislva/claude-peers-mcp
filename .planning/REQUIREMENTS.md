@@ -34,11 +34,11 @@ Requirements for peer-aware autonomous workflow. Each maps to roadmap phases.
 
 ### Decision Proxy
 
-- [ ] **PRXY-01**: Decision proxy peer receives `discuss_choice` messages with phase context, question, options, and recommended default
-- [ ] **PRXY-02**: Decision proxy responds with `discuss_answer` containing chosen option and reasoning within 60 seconds
-- [ ] **PRXY-03**: Decision proxy includes prior decisions from the same autonomous run in each query for consistency
-- [ ] **PRXY-04**: All proxy decisions are logged to `.planning/DECISIONS.md` as an audit trail
-- [ ] **PRXY-05**: Orchestrator falls back to recommended default if proxy is unavailable or times out
+- [x] **PRXY-01**: Decision proxy peer receives `discuss_choice` messages with phase context, question, options, and recommended default
+- [x] **PRXY-02**: Decision proxy responds with `discuss_answer` containing chosen option and reasoning within 60 seconds
+- [x] **PRXY-03**: Decision proxy includes prior decisions from the same autonomous run in each query for consistency
+- [x] **PRXY-04**: All proxy decisions are logged to `.planning/DECISIONS.md` as an audit trail
+- [x] **PRXY-05**: Orchestrator falls back to recommended default if proxy is unavailable or times out
 
 ### Orchestrator Workflow
 
@@ -108,11 +108,11 @@ Deferred to future release. Tracked but not in current roadmap.
 | EXEC-07 | Phase 2 | Complete |
 | EXEC-08 | Phase 2 | Complete |
 | EXEC-09 | Phase 2 | Complete |
-| PRXY-01 | Phase 3 | Pending |
-| PRXY-02 | Phase 3 | Pending |
-| PRXY-03 | Phase 3 | Pending |
-| PRXY-04 | Phase 3 | Pending |
-| PRXY-05 | Phase 3 | Pending |
+| PRXY-01 | Phase 3 | Complete |
+| PRXY-02 | Phase 3 | Complete |
+| PRXY-03 | Phase 3 | Complete |
+| PRXY-04 | Phase 3 | Complete |
+| PRXY-05 | Phase 3 | Complete |
 | ORCH-01 | Phase 4 | Pending |
 | ORCH-02 | Phase 4 | Pending |
 | ORCH-03 | Phase 4 | Pending |
