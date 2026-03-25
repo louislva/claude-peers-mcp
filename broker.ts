@@ -764,7 +764,50 @@ function handlePeerAvailability(body: PeerAvailabilityRequest): PeerAvailability
   };
 }
 
+// Files that are implicitly modified when any file in their directory changes
+const LOCK_FILE_NAMES = ["package-lock.json", "bun.lockb", "yarn.lock", "pnpm-lock.yaml"];
+
+// Auto-generated index/barrel files that aggregate exports from a directory
+const AUTO_GENERATED_PATTERNS = ["index.ts", "index.js", "index.tsx", "index.jsx"];
+
+/**
+ * Expand a file list to include lock files and auto-generated indexes
+ * that would be implicitly affected by modifications.
+ *
+ * For each declared file:
+ * - If it's a package.json → add all lock file variants in same dir
+ * - If it's a source file in a directory → add index.ts/index.js in same dir
+ *
+ * Returns deduplicated expanded list.
+ */
+function expandFilesForConflictCheck(files: string[]): string[] {
+  const expanded = new Set(files);
+
+  for (const file of files) {
+    const dir = file.substring(0, file.lastIndexOf("/") + 1) || "./";
+    const basename = file.substring(file.lastIndexOf("/") + 1);
+
+    // If modifying package.json, also claim lock files
+    if (basename === "package.json") {
+      for (const lock of LOCK_FILE_NAMES) {
+        expanded.add(dir + lock);
+      }
+    }
+
+    // If modifying a source file, also claim index/barrel file in same directory
+    if (/\.(ts|tsx|js|jsx)$/.test(basename) && !AUTO_GENERATED_PATTERNS.includes(basename)) {
+      for (const idx of AUTO_GENERATED_PATTERNS) {
+        expanded.add(dir + idx);
+      }
+    }
+  }
+
+  return Array.from(expanded);
+}
+
 function handleConflictCheck(body: { wave_id: number; files: string[] }): { conflicts: { task_id: number; task_name: string; conflicting_files: string[] }[] } {
+  const expandedInput = expandFilesForConflictCheck(body.files);
+
   const runningTasks = db.query(
     "SELECT id, files, task_name FROM task_assignments WHERE wave_id = ? AND status = 'running'"
   ).all(body.wave_id) as { id: number; files: string; task_name: string }[];
@@ -772,7 +815,8 @@ function handleConflictCheck(body: { wave_id: number; files: string[] }): { conf
   const conflicts: { task_id: number; task_name: string; conflicting_files: string[] }[] = [];
   for (const task of runningTasks) {
     const taskFiles: string[] = JSON.parse(task.files);
-    const overlap = body.files.filter(f => taskFiles.includes(f));
+    const expandedTaskFiles = expandFilesForConflictCheck(taskFiles);
+    const overlap = expandedInput.filter(f => expandedTaskFiles.includes(f));
     if (overlap.length > 0) {
       conflicts.push({ task_id: task.id, task_name: task.task_name, conflicting_files: overlap });
     }
