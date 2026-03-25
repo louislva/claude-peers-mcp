@@ -61,7 +61,10 @@ Plans:
   3. Each `discuss_choice` payload includes prior decisions from the current autonomous run so the proxy can answer consistently
   4. Every proxy answer is appended to `.planning/DECISIONS.md` as a permanent audit trail
   5. If no proxy peer is reachable or the 60-second timeout elapses, the orchestrator uses the recommended default and continues
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 03-01-PLAN.md — Proxy helpers TypeScript module: all protocol functions (poll, parse, answer, append decision, orchestrator-side choice/wait/timeout)
+- [ ] 03-02-PLAN.md — Proxy agent markdown document + integration tests for all proxy helper functions
 
 ### Phase 4: Orchestrator Workflow
 **Goal**: The `/gsd:autonomous-peers` workflow orchestrates a full autonomous milestone run — discovering peers, grouping phases into dependency waves, dispatching to executors in parallel, routing discuss-phase choices through the proxy, recovering from executor death, and falling back to sequential execution when no peers are present
@@ -94,6 +97,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete   | 2026-03-25 |
 | 2. Executor Protocol | 3/3 | Complete   | 2026-03-25 |
-| 3. Decision Proxy | 0/TBD | Not started | - |
+| 3. Decision Proxy | 0/2 | Not started | - |
 | 4. Orchestrator Workflow | 0/TBD | Not started | - |
 | 5. Runtime Module and Tests | 0/TBD | Not started | - |
