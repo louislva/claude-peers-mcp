@@ -30,7 +30,7 @@ Multiple Claude Code instances can collaborate autonomously on GSD milestones wi
 - [ ] Peer-aware autonomous wrapper workflow
 - [ ] Decision proxy peer for unattended discuss-phase choices
 - [ ] Parallel phase execution with dependency analysis
-- [ ] New broker endpoint: `/peer-availability`
+- [x] New broker endpoint: `/peer-availability` — Validated in Phase 1: Foundation
 - [ ] Executor protocol (receive plan, execute, report, handle blocks)
 - [ ] Error recovery (death handling, task reclaim, conflict resolution)
 
@@ -70,4 +70,4 @@ Multiple Claude Code instances can collaborate autonomously on GSD milestones wi
 | Filesystem-first context handoff | Executors read plan files from git, no large message payloads | -- Pending |
 
 ---
-*Last updated: 2026-03-25 after milestone v1.0 initialization*
+*Last updated: 2026-03-25 after Phase 1 (Foundation) complete — type contracts settled, /peer-availability live, conflict-check expanded*
