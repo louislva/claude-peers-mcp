@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Executor Protocol** - Executor agent lifecycle, git setup, ACK/progress/completion/blocked/reclaim protocol (completed 2026-03-25)
 - [x] **Phase 3: Decision Proxy** - Proxy agent persona, discuss_choice/discuss_answer protocol, DECISIONS.md logging (completed 2026-03-25)
 - [x] **Phase 4: Orchestrator Workflow** - Full autonomous peers workflow: discovery, dependency analysis, wave dispatch, monitoring, death handling, fallback (completed 2026-03-25)
-- [ ] **Phase 5: Runtime Module and Tests** - Extracted runtime module (Kahn's algorithm, wave polling), integration test coverage
+- [x] **Phase 5: Runtime Module and Tests** - Extracted runtime module (Kahn's algorithm, wave polling), integration test coverage (completed 2026-03-25)
 
 ## Phase Details
 
@@ -91,7 +91,7 @@ Plans:
   1. `gsd-plugin/autonomous-peers-runtime.ts` exports Kahn's topological sort and the wave polling loop as independently unit-testable functions
   2. `broker.test.ts` includes passing integration tests for `/peer-availability` covering available-only, busy-only, and mixed peer states
   3. A documented two-session smoke test runbook exists that a developer can follow to verify end-to-end executor handshake (execute_phase → ack → phase_complete)
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 05-01-PLAN.md — Extract runtime module (Kahn's sort + wave polling) from orchestrator-helpers into autonomous-peers-runtime.ts
 - [ ] 05-02-PLAN.md — Mixed-state /peer-availability integration test + two-session executor handshake smoke test runbook
@@ -107,4 +107,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Executor Protocol | 3/3 | Complete   | 2026-03-25 |
 | 3. Decision Proxy | 2/2 | Complete   | 2026-03-25 |
 | 4. Orchestrator Workflow | 4/4 | Complete   | 2026-03-25 |
-| 5. Runtime Module and Tests | 1/2 | In Progress|  |
+| 5. Runtime Module and Tests | 2/2 | Complete   | 2026-03-25 |
