@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 04-orchestrator-workflow-01-PLAN.md
-last_updated: "2026-03-25T18:39:18.079Z"
+stopped_at: Completed 04-orchestrator-workflow-02-PLAN.md
+last_updated: "2026-03-25T18:51:03.186Z"
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 11
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
@@ -54,6 +54,7 @@ Plan: 1 of 4
 | Phase 03-decision-proxy P01 | 1 min | 1 tasks | 1 files |
 | Phase 03-decision-proxy P02 | 3 | 2 tasks | 2 files |
 | Phase 04-orchestrator-workflow P01 | 15 | 2 tasks | 2 files |
+| Phase 04-orchestrator-workflow P02 | 9 | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,10 @@ Recent decisions affecting current work:
 - [Phase 04-orchestrator-workflow]: parseRoadmapPhases pre-scans overview section for [x] markers before section headers to correctly capture completed phase status
 - [Phase 04-orchestrator-workflow]: checkWaveConflicts uses local file-overlap matrix (not broker /conflict-check) — static planning-time analysis, no broker round trip
 - [Phase 04-orchestrator-workflow]: buildExecutionWaves only counts pending dependencies in inDegree — completed phases pre-satisfied and excluded from scheduling
+- [Phase 04-orchestrator-workflow]: dispatchWave checks /wave-status after /wave-create and skips non-pending tasks — idempotent on retry without double-dispatch
+- [Phase 04-orchestrator-workflow]: Executors own /task-start — dispatchWave sends execute_phase message only; executor calls /task-start when it begins work
+- [Phase 04-orchestrator-workflow]: waitForWaveComplete drains message queue before checking stale timestamps — prevents false reclaims when progress messages are pending
+- [Phase 04-orchestrator-workflow]: shouldDelegate uses filesModified.length < 3 as proxy for 'fewer than 3 tasks' heuristic — avoids plan-file reads at dispatch time
 
 ### Pending Todos
 
@@ -102,6 +107,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T18:39:18.078Z
-Stopped at: Completed 04-orchestrator-workflow-01-PLAN.md
+Last session: 2026-03-25T18:51:03.184Z
+Stopped at: Completed 04-orchestrator-workflow-02-PLAN.md
 Resume file: None

@@ -46,14 +46,14 @@ Requirements for peer-aware autonomous workflow. Each maps to roadmap phases.
 - [x] **ORCH-02**: Orchestrator classifies peers into decision_proxy (at most one) and executors by summary content
 - [x] **ORCH-03**: Orchestrator builds dependency graph from ROADMAP.md phases with cycle detection (Kahn's algorithm)
 - [x] **ORCH-04**: Orchestrator groups independent phases into execution waves based on dependency graph
-- [ ] **ORCH-05**: Orchestrator plans all phases in a wave sequentially (orchestrator-only), then dispatches execution in parallel to peers
-- [ ] **ORCH-06**: Orchestrator delegates discuss-phase choices to decision proxy instead of prompting user
-- [ ] **ORCH-07**: Orchestrator monitors wave progress via `/wave-status` polling every 10 seconds
-- [ ] **ORCH-08**: Orchestrator reclaims tasks from unresponsive executors (no progress for 120s, no status_response within 30s)
-- [ ] **ORCH-09**: Orchestrator handles executor death by checking git for partial work and reassigning
-- [ ] **ORCH-10**: Orchestrator performs post-wave sync (git pull, re-read ROADMAP.md, update STATE.md, refresh peer list)
-- [ ] **ORCH-11**: Orchestrator applies delegation decision logic (delegate vs execute locally based on phase size, dependencies, checkpoint types, file conflicts)
-- [ ] **ORCH-12**: Orchestrator falls back to standard sequential autonomous if no peers are available
+- [x] **ORCH-05**: Orchestrator plans all phases in a wave sequentially (orchestrator-only), then dispatches execution in parallel to peers
+- [x] **ORCH-06**: Orchestrator delegates discuss-phase choices to decision proxy instead of prompting user
+- [x] **ORCH-07**: Orchestrator monitors wave progress via `/wave-status` polling every 10 seconds
+- [x] **ORCH-08**: Orchestrator reclaims tasks from unresponsive executors (no progress for 120s, no status_response within 30s)
+- [x] **ORCH-09**: Orchestrator handles executor death by checking git for partial work and reassigning
+- [x] **ORCH-10**: Orchestrator performs post-wave sync (git pull, re-read ROADMAP.md, update STATE.md, refresh peer list)
+- [x] **ORCH-11**: Orchestrator applies delegation decision logic (delegate vs execute locally based on phase size, dependencies, checkpoint types, file conflicts)
+- [x] **ORCH-12**: Orchestrator falls back to standard sequential autonomous if no peers are available
 - [x] **ORCH-13**: Orchestrator serializes conflicting phases into synthetic sub-waves when conflict-check detects file overlap
 
 ## v2 Requirements
@@ -117,14 +117,14 @@ Deferred to future release. Tracked but not in current roadmap.
 | ORCH-02 | Phase 4 | Complete |
 | ORCH-03 | Phase 4 | Complete |
 | ORCH-04 | Phase 4 | Complete |
-| ORCH-05 | Phase 4 | Pending |
-| ORCH-06 | Phase 4 | Pending |
-| ORCH-07 | Phase 4 | Pending |
-| ORCH-08 | Phase 4 | Pending |
-| ORCH-09 | Phase 4 | Pending |
-| ORCH-10 | Phase 4 | Pending |
-| ORCH-11 | Phase 4 | Pending |
-| ORCH-12 | Phase 4 | Pending |
+| ORCH-05 | Phase 4 | Complete |
+| ORCH-06 | Phase 4 | Complete |
+| ORCH-07 | Phase 4 | Complete |
+| ORCH-08 | Phase 4 | Complete |
+| ORCH-09 | Phase 4 | Complete |
+| ORCH-10 | Phase 4 | Complete |
+| ORCH-11 | Phase 4 | Complete |
+| ORCH-12 | Phase 4 | Complete |
 | ORCH-13 | Phase 4 | Complete |
 
 **Coverage:**
