@@ -76,7 +76,12 @@ Plans:
   3. Orchestrator dispatches phases in a wave to available executors in parallel after planning them sequentially, then polls `/wave-status` every 10 seconds to monitor progress
   4. Orchestrator reclaims tasks from unresponsive executors (no `phase_progress` for 120s, no `status_response` within 30s after a `status_request`) and reassigns them
   5. When no peers are discovered, the orchestrator falls back to standard sequential autonomous execution without error
-**Plans**: TBD
+**Plans:** 4 plans
+Plans:
+- [ ] 04-01-PLAN.md — Orchestrator helpers Part 1: discovery, classification, ROADMAP parsing, Kahn's wave grouping, conflict serialization
+- [ ] 04-02-PLAN.md — Orchestrator helpers Part 2: dispatch, monitoring, reclaim, death handling, post-wave sync, delegation logic
+- [ ] 04-03-PLAN.md — Orchestrator agent document + autonomous-peers workflow document
+- [ ] 04-04-PLAN.md — Integration tests for orchestrator helper functions
 
 ### Phase 5: Runtime Module and Tests
 **Goal**: The topological sort and wave polling logic are extracted into a standalone testable module, and integration test coverage validates the `/peer-availability` endpoint and the full two-session executor handshake
@@ -98,5 +103,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Foundation | 2/2 | Complete   | 2026-03-25 |
 | 2. Executor Protocol | 3/3 | Complete   | 2026-03-25 |
 | 3. Decision Proxy | 2/2 | Complete   | 2026-03-25 |
-| 4. Orchestrator Workflow | 0/TBD | Not started | - |
+| 4. Orchestrator Workflow | 0/4 | Not started | - |
 | 5. Runtime Module and Tests | 0/TBD | Not started | - |
