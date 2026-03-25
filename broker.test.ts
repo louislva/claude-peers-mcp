@@ -696,6 +696,74 @@ test("/peer-availability puts non-repo peers in machine_peers", async () => {
   await brokerPost("/unregister", { id: reg.id });
 });
 
+test("/peer-availability returns both available and busy peers in mixed state", async () => {
+  // Use process.pid for idle and process.ppid for busy so both PIDs pass the liveness check
+  // (broker skips peers whose PID is no longer alive via process.kill(pid, 0))
+  const idlePid = process.pid;
+  const busyPid = process.ppid;
+
+  // Register an idle peer via /register
+  const idleReg = await brokerPost<{ id: string }>("/register", {
+    pid: idlePid,
+    cwd: "/tmp/mixed-idle",
+    git_root: "/tmp/mixed-avail-repo",
+    tty: null,
+    summary: "idle peer for mixed test",
+  });
+
+  // Register a busy peer via /session-heartbeat (atomic peer creation, different PID)
+  const busyHb = await brokerPost<{ peer_id: string; session_id: string }>("/session-heartbeat", {
+    session_id: "mixed-busy-session",
+    pid: busyPid,
+    cwd: "/tmp/mixed-busy",
+    git_root: "/tmp/mixed-avail-repo",
+    task_summary: "executing phase",
+  });
+
+  // Create a wave and start a task for the busy peer
+  const wave = await brokerPost<{ wave_id: number; task_ids: number[] }>("/wave-create", {
+    repo: "/tmp/mixed-avail-repo",
+    phase: 88,
+    wave_number: 1,
+    tasks: [{ name: "mixed-test-task", files: [] }],
+  });
+
+  await brokerPost("/task-start", {
+    task_id: wave.task_ids[0],
+    session_id: "mixed-busy-session",
+  });
+
+  // Query /peer-availability for the shared repo
+  const res = await brokerPost<{
+    repo_peers: {
+      available: { id: string; idle_since: string }[];
+      busy: { id: string; current_task: string; task_started_at: string }[];
+    };
+    machine_peers: { available: unknown[]; busy: unknown[] };
+  }>("/peer-availability", {
+    repo: "/tmp/mixed-avail-repo",
+  });
+
+  // Assert both categories are populated
+  expect(res.repo_peers.available.length).toBeGreaterThanOrEqual(1);
+  expect(res.repo_peers.busy.length).toBeGreaterThanOrEqual(1);
+
+  // Idle peer appears in available
+  const foundIdle = res.repo_peers.available.find((p) => p.id === idleReg.id);
+  expect(foundIdle).toBeDefined();
+  expect(foundIdle!.idle_since).toBeDefined();
+
+  // Busy peer appears in busy
+  const foundBusy = res.repo_peers.busy.find((p) => p.id === busyHb.peer_id);
+  expect(foundBusy).toBeDefined();
+  expect(foundBusy!.current_task).toBe("mixed-test-task");
+  expect(foundBusy!.task_started_at).toBeDefined();
+
+  // Cleanup
+  await brokerPost("/unregister", { id: idleReg.id });
+  await brokerPost("/session-end", { session_id: "mixed-busy-session" });
+});
+
 // --- Phase 5: Expanded conflict-check tests ---
 
 test("conflict-check detects lock file conflicts from package.json", async () => {
