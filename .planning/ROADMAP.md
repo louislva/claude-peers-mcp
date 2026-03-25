@@ -12,7 +12,7 @@ This milestone adds peer-aware autonomous execution to the existing gsd-comms-mc
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation** - Shared type contracts and broker availability endpoint
+- [x] **Phase 1: Foundation** - Shared type contracts and broker availability endpoint (completed 2026-03-25)
 - [ ] **Phase 2: Executor Protocol** - Executor agent lifecycle, git setup, ACK/progress/completion/blocked/reclaim protocol
 - [ ] **Phase 3: Decision Proxy** - Proxy agent persona, discuss_choice/discuss_answer protocol, DECISIONS.md logging
 - [ ] **Phase 4: Orchestrator Workflow** - Full autonomous peers workflow: discovery, dependency analysis, wave dispatch, monitoring, death handling, fallback
@@ -30,7 +30,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. `POST /peer-availability` returns available and busy peers in a single broker round trip, replacing three separate calls
   4. `POST /task-complete` and wave-status logic recognize a `failed` terminal state that unblocks wave completion
   5. `/conflict-check` payload accepts and evaluates lock files and auto-generated index files, not only declared source files
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 01-01-PLAN.md — Type contracts: 9 autonomous message types, payload interfaces, peer availability types, BRKR-02 verification
 - [ ] 01-02-PLAN.md — Broker endpoints: /peer-availability endpoint, expanded conflict-check, integration tests
@@ -88,7 +88,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 1/2 | In Progress|  |
+| 1. Foundation | 2/2 | Complete   | 2026-03-25 |
 | 2. Executor Protocol | 0/TBD | Not started | - |
 | 3. Decision Proxy | 0/TBD | Not started | - |
 | 4. Orchestrator Workflow | 0/TBD | Not started | - |
