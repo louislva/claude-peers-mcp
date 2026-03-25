@@ -38,7 +38,11 @@ const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
-const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
+const BROKER_SCRIPT = (() => {
+  const raw = new URL("./broker.ts", import.meta.url).pathname;
+  // On Windows, pathname may be "/C:/..." — strip the leading slash
+  return raw.match(/^\/[A-Za-z]:/) ? raw.slice(1) : raw;
+})();
 
 // --- Broker communication ---
 
@@ -364,7 +368,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         };
       }
       try {
+        // poll-messages marks as delivered — this is the explicit consume path
         const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+
+        // Clean up dedup set for consumed messages
+        for (const m of result.messages) {
+          notifiedMessageIds.delete(m.id);
+        }
+
         if (result.messages.length === 0) {
           return {
             content: [{ type: "text" as const, text: "No new messages." }],
@@ -401,13 +412,21 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 // --- Polling loop for inbound messages ---
 
+// Track which messages we've already pushed as notifications (dedup)
+const notifiedMessageIds = new Set<number>();
+
 async function pollAndPushMessages() {
   if (!myId) return;
 
   try {
-    const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+    // Use /peek-messages — reads without marking as delivered
+    // Messages stay available for check_messages to consume explicitly
+    const result = await brokerFetch<PollMessagesResponse>("/peek-messages", { id: myId });
 
     for (const msg of result.messages) {
+      // Skip if we already pushed this notification
+      if (notifiedMessageIds.has(msg.id)) continue;
+      notifiedMessageIds.add(msg.id);
       // Look up the sender's info for context
       let fromSummary = "";
       let fromCwd = "";
