@@ -236,7 +236,7 @@ export async function reclaimExecutorTask(
     msg_type: "reclaim_task",
     payload: { task_id: taskId, wave_id: waveId, reason } satisfies ReclaimTaskPayload,
   });
-  await brokerFetch("/task-blocked", { task_id: taskId, error: reason });
+  await brokerFetch("/task-blocked", { task_id: taskId, reason });
 }
 
 /**
