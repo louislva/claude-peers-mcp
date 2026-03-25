@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 03-decision-proxy-02-PLAN.md
-last_updated: "2026-03-25T17:50:48.390Z"
+stopped_at: Completed 04-orchestrator-workflow-01-PLAN.md
+last_updated: "2026-03-25T18:39:18.079Z"
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 11
+  completed_plans: 8
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Multiple Claude Code instances can collaborate autonomously on GSD milestones without human intervention
-**Current focus:** Phase 03 — decision-proxy
+**Current focus:** Phase 04 — orchestrator-workflow
 
 ## Current Position
 
-Phase: 03 (decision-proxy) — EXECUTING
-Plan: 2 of 2
+Phase: 04 (orchestrator-workflow) — EXECUTING
+Plan: 1 of 4
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Plan: 2 of 2
 | Phase 02-executor-protocol P03 | 5 | 1 tasks | 1 files |
 | Phase 03-decision-proxy P01 | 1 min | 1 tasks | 1 files |
 | Phase 03-decision-proxy P02 | 3 | 2 tasks | 2 files |
+| Phase 04-orchestrator-workflow P01 | 15 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,10 @@ Recent decisions affecting current work:
 - [Phase 03-decision-proxy P02]: gsd-proxy.md uses 'Decision proxy -- answering discuss-phase choices for autonomous runs' as exact summary string for orchestrator peer discovery
 - [Phase 03-decision-proxy P02]: Proxy ACKs discuss_choice immediately (before evaluation) to prevent re-delivery during ANSWERING state
 - [Phase 03-decision-proxy P02]: appendDecision called BEFORE sendAnswer in proxy protocol — audit trail written even if broker send fails
+- [Phase 04-orchestrator-workflow]: brokerFetch duplicated inside orchestrator-helpers.ts (not imported cross-module) per established per-module self-contained pattern
+- [Phase 04-orchestrator-workflow]: parseRoadmapPhases pre-scans overview section for [x] markers before section headers to correctly capture completed phase status
+- [Phase 04-orchestrator-workflow]: checkWaveConflicts uses local file-overlap matrix (not broker /conflict-check) — static planning-time analysis, no broker round trip
+- [Phase 04-orchestrator-workflow]: buildExecutionWaves only counts pending dependencies in inDegree — completed phases pre-satisfied and excluded from scheduling
 
 ### Pending Todos
 
@@ -97,6 +102,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T17:46:33.426Z
-Stopped at: Completed 03-decision-proxy-02-PLAN.md
+Last session: 2026-03-25T18:39:18.078Z
+Stopped at: Completed 04-orchestrator-workflow-01-PLAN.md
 Resume file: None

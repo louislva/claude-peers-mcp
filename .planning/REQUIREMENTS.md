@@ -42,10 +42,10 @@ Requirements for peer-aware autonomous workflow. Each maps to roadmap phases.
 
 ### Orchestrator Workflow
 
-- [ ] **ORCH-01**: Orchestrator discovers available peers via `/peer-availability` on startup
-- [ ] **ORCH-02**: Orchestrator classifies peers into decision_proxy (at most one) and executors by summary content
-- [ ] **ORCH-03**: Orchestrator builds dependency graph from ROADMAP.md phases with cycle detection (Kahn's algorithm)
-- [ ] **ORCH-04**: Orchestrator groups independent phases into execution waves based on dependency graph
+- [x] **ORCH-01**: Orchestrator discovers available peers via `/peer-availability` on startup
+- [x] **ORCH-02**: Orchestrator classifies peers into decision_proxy (at most one) and executors by summary content
+- [x] **ORCH-03**: Orchestrator builds dependency graph from ROADMAP.md phases with cycle detection (Kahn's algorithm)
+- [x] **ORCH-04**: Orchestrator groups independent phases into execution waves based on dependency graph
 - [ ] **ORCH-05**: Orchestrator plans all phases in a wave sequentially (orchestrator-only), then dispatches execution in parallel to peers
 - [ ] **ORCH-06**: Orchestrator delegates discuss-phase choices to decision proxy instead of prompting user
 - [ ] **ORCH-07**: Orchestrator monitors wave progress via `/wave-status` polling every 10 seconds
@@ -54,7 +54,7 @@ Requirements for peer-aware autonomous workflow. Each maps to roadmap phases.
 - [ ] **ORCH-10**: Orchestrator performs post-wave sync (git pull, re-read ROADMAP.md, update STATE.md, refresh peer list)
 - [ ] **ORCH-11**: Orchestrator applies delegation decision logic (delegate vs execute locally based on phase size, dependencies, checkpoint types, file conflicts)
 - [ ] **ORCH-12**: Orchestrator falls back to standard sequential autonomous if no peers are available
-- [ ] **ORCH-13**: Orchestrator serializes conflicting phases into synthetic sub-waves when conflict-check detects file overlap
+- [x] **ORCH-13**: Orchestrator serializes conflicting phases into synthetic sub-waves when conflict-check detects file overlap
 
 ## v2 Requirements
 
@@ -113,10 +113,10 @@ Deferred to future release. Tracked but not in current roadmap.
 | PRXY-03 | Phase 3 | Complete |
 | PRXY-04 | Phase 3 | Complete |
 | PRXY-05 | Phase 3 | Complete |
-| ORCH-01 | Phase 4 | Pending |
-| ORCH-02 | Phase 4 | Pending |
-| ORCH-03 | Phase 4 | Pending |
-| ORCH-04 | Phase 4 | Pending |
+| ORCH-01 | Phase 4 | Complete |
+| ORCH-02 | Phase 4 | Complete |
+| ORCH-03 | Phase 4 | Complete |
+| ORCH-04 | Phase 4 | Complete |
 | ORCH-05 | Phase 4 | Pending |
 | ORCH-06 | Phase 4 | Pending |
 | ORCH-07 | Phase 4 | Pending |
@@ -125,7 +125,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | ORCH-10 | Phase 4 | Pending |
 | ORCH-11 | Phase 4 | Pending |
 | ORCH-12 | Phase 4 | Pending |
-| ORCH-13 | Phase 4 | Pending |
+| ORCH-13 | Phase 4 | Complete |
 
 **Coverage:**
 - v1.0 requirements: 34 total
