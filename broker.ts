@@ -784,8 +784,10 @@ function expandFilesForConflictCheck(files: string[]): string[] {
   const expanded = new Set(files);
 
   for (const file of files) {
-    const dir = file.substring(0, file.lastIndexOf("/") + 1) || "./";
-    const basename = file.substring(file.lastIndexOf("/") + 1);
+    const lastSlash = file.lastIndexOf("/");
+    // dir is "" for root-level files, "src/auth/" for nested files
+    const dir = lastSlash >= 0 ? file.substring(0, lastSlash + 1) : "";
+    const basename = lastSlash >= 0 ? file.substring(lastSlash + 1) : file;
 
     // If modifying package.json, also claim lock files
     if (basename === "package.json") {

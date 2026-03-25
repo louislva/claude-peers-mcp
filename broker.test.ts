@@ -468,7 +468,8 @@ test("conflict-check finds overlapping files", async () => {
   });
 
   expect(check.conflicts.length).toBe(1);
-  expect(check.conflicts[0].conflicting_files).toEqual(["src/shared.ts"]);
+  // After conflict-check expansion, overlapping files include src/shared.ts and potentially barrel exports
+  expect(check.conflicts[0].conflicting_files).toContain("src/shared.ts");
 });
 
 // --- Phase 4: Structured messages + ACK ---
@@ -580,6 +581,183 @@ test("unregister succeeds even when peer has delivered messages (FK regression)"
   // Also unregister receiver (has to_id FK ref on delivered message)
   const res2 = await brokerPost<{ ok: boolean }>("/unregister", { id: receiver.id });
   expect(res2.ok).toBe(true);
+});
+
+// --- Phase 5: Peer availability tests ---
+
+test("/peer-availability returns empty when no peers match repo", async () => {
+  const res = await brokerPost<{ repo_peers: { available: unknown[]; busy: unknown[] }; machine_peers: { available: unknown[]; busy: unknown[] } }>("/peer-availability", {
+    repo: "/nonexistent/repo",
+  });
+  expect(res.repo_peers.available).toEqual([]);
+  expect(res.repo_peers.busy).toEqual([]);
+  // machine_peers may contain peers from other tests
+  expect(res.machine_peers).toBeDefined();
+});
+
+test("/peer-availability classifies idle peer as available", async () => {
+  // Register a peer with a git_root via /register
+  const reg = await brokerPost<{ id: string }>("/register", {
+    pid: process.pid,
+    cwd: "/tmp/avail-test",
+    git_root: "/tmp/avail-repo",
+    tty: null,
+    summary: "idle peer",
+  });
+
+  const res = await brokerPost<{ repo_peers: { available: { id: string; idle_since: string }[]; busy: unknown[] } }>("/peer-availability", {
+    repo: "/tmp/avail-repo",
+  });
+
+  const found = res.repo_peers.available.find((p) => p.id === reg.id);
+  expect(found).toBeDefined();
+  expect(found!.idle_since).toBeDefined();
+  expect(res.repo_peers.busy.length).toBe(0);
+
+  // Cleanup
+  await brokerPost("/unregister", { id: reg.id });
+});
+
+test("/peer-availability classifies peer with running task as busy", async () => {
+  // Register peer + create session + assign running task
+  const hb = await brokerPost<{ peer_id: string; session_id: string }>("/session-heartbeat", {
+    session_id: "busy-session-1",
+    pid: process.pid,
+    cwd: "/tmp/busy-test",
+    git_root: "/tmp/busy-repo",
+    task_summary: "executing phase 1",
+  });
+
+  // Create a wave + task and start it
+  const wave = await brokerPost<{ wave_id: number; task_ids: number[] }>("/wave-create", {
+    repo: "/tmp/busy-repo",
+    phase: 99,
+    wave_number: 1,
+    tasks: [{ name: "busy-task", files: ["src/foo.ts"] }],
+  });
+
+  await brokerPost("/task-start", {
+    task_id: wave.task_ids[0],
+    session_id: "busy-session-1",
+  });
+
+  const res = await brokerPost<{ repo_peers: { available: unknown[]; busy: { id: string; current_task: string; task_started_at: string }[] } }>("/peer-availability", {
+    repo: "/tmp/busy-repo",
+  });
+
+  const found = res.repo_peers.busy.find((p) => p.id === hb.peer_id);
+  expect(found).toBeDefined();
+  expect(found!.current_task).toBe("busy-task");
+  expect(found!.task_started_at).toBeDefined();
+
+  // Cleanup
+  await brokerPost("/session-end", { session_id: "busy-session-1" });
+});
+
+test("/peer-availability excludes requesting peer via exclude_id", async () => {
+  const reg = await brokerPost<{ id: string }>("/register", {
+    pid: process.pid,
+    cwd: "/tmp/exclude-test",
+    git_root: "/tmp/exclude-repo",
+    tty: null,
+    summary: "self peer",
+  });
+
+  const res = await brokerPost<{ repo_peers: { available: { id: string }[]; busy: unknown[] } }>("/peer-availability", {
+    repo: "/tmp/exclude-repo",
+    exclude_id: reg.id,
+  });
+
+  const found = res.repo_peers.available.find((p) => p.id === reg.id);
+  expect(found).toBeUndefined();
+
+  await brokerPost("/unregister", { id: reg.id });
+});
+
+test("/peer-availability puts non-repo peers in machine_peers", async () => {
+  const reg = await brokerPost<{ id: string }>("/register", {
+    pid: process.pid,
+    cwd: "/tmp/machine-test",
+    git_root: "/tmp/other-repo",
+    tty: null,
+    summary: "other repo peer",
+  });
+
+  const res = await brokerPost<{ repo_peers: { available: { id: string }[] }; machine_peers: { available: { id: string }[] } }>("/peer-availability", {
+    repo: "/tmp/target-repo",
+  });
+
+  // Should NOT be in repo_peers
+  expect(res.repo_peers.available.find((p) => p.id === reg.id)).toBeUndefined();
+  // Should be in machine_peers
+  const found = res.machine_peers.available.find((p) => p.id === reg.id);
+  expect(found).toBeDefined();
+
+  await brokerPost("/unregister", { id: reg.id });
+});
+
+// --- Phase 5: Expanded conflict-check tests ---
+
+test("conflict-check detects lock file conflicts from package.json", async () => {
+  const wave = await brokerPost<{ wave_id: number; task_ids: number[] }>("/wave-create", {
+    repo: "/tmp/conflict-lock-test",
+    phase: 98,
+    wave_number: 1,
+    tasks: [{ name: "lock-task", files: ["package.json"] }],
+  });
+
+  // Start the task so it's "running"
+  await brokerPost("/session-heartbeat", {
+    session_id: "lock-session",
+    pid: 66610,
+    cwd: "/tmp/conflict-lock-test",
+    git_root: "/tmp/conflict-lock-test",
+    task_summary: "running lock task",
+  });
+  await brokerPost("/task-start", {
+    task_id: wave.task_ids[0],
+    session_id: "lock-session",
+  });
+
+  // Check if bun.lockb conflicts (it should, because package.json expands to include lock files)
+  const res = await brokerPost<{ conflicts: { conflicting_files: string[] }[] }>("/conflict-check", {
+    wave_id: wave.wave_id,
+    files: ["bun.lockb"],
+  });
+
+  expect(res.conflicts.length).toBeGreaterThan(0);
+  expect(res.conflicts[0].conflicting_files).toContain("bun.lockb");
+});
+
+test("conflict-check detects index.ts conflicts from source files in same dir", async () => {
+  const wave = await brokerPost<{ wave_id: number; task_ids: number[] }>("/wave-create", {
+    repo: "/tmp/conflict-index-test",
+    phase: 97,
+    wave_number: 1,
+    tasks: [{ name: "index-task", files: ["src/auth/middleware.ts"] }],
+  });
+
+  await brokerPost("/session-heartbeat", {
+    session_id: "index-session",
+    pid: 66620,
+    cwd: "/tmp/conflict-index-test",
+    git_root: "/tmp/conflict-index-test",
+    task_summary: "running index task",
+  });
+  await brokerPost("/task-start", {
+    task_id: wave.task_ids[0],
+    session_id: "index-session",
+  });
+
+  // Check if src/auth/validators.ts conflicts via shared src/auth/index.ts
+  const res = await brokerPost<{ conflicts: { conflicting_files: string[] }[] }>("/conflict-check", {
+    wave_id: wave.wave_id,
+    files: ["src/auth/validators.ts"],
+  });
+
+  expect(res.conflicts.length).toBeGreaterThan(0);
+  // Both expand to include src/auth/index.ts
+  expect(res.conflicts[0].conflicting_files).toContain("src/auth/index.ts");
 });
 
 // --- Stats + monitoring ---
