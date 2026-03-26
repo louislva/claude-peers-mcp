@@ -536,9 +536,19 @@ async function main() {
   log("MCP connected");
 
   // 6. Start polling for inbound messages (serialized to prevent overlapping polls)
+  const POLL_TIMEOUT_MS = 10_000;
   let pollTimer: Timer;
   async function pollLoop() {
-    await pollAndPushMessages();
+    try {
+      await Promise.race([
+        pollAndPushMessages(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("poll timed out")), POLL_TIMEOUT_MS)
+        ),
+      ]);
+    } catch (e) {
+      log(`Poll error: ${e}`);
+    }
     pollTimer = setTimeout(pollLoop, POLL_INTERVAL_MS);
   }
   pollTimer = setTimeout(pollLoop, POLL_INTERVAL_MS);
