@@ -92,6 +92,22 @@ If you set `OPENAI_API_KEY` in your environment, each instance generates a brief
 
 Without the API key, Claude sets its own summary via the `set_summary` tool.
 
+## Roles
+
+Assign roles to instances so coordinators recognize them automatically:
+
+```bash
+# Start with a role
+CLAUDE_PEERS_ROLE="frontend-dev" claude --dangerously-load-development-channels server:claude-peers
+
+# Handy aliases
+alias claude-koordinator='CLAUDE_PEERS_ROLE="koordinator" claude --dangerously-load-development-channels server:claude-peers'
+alias claude-frontend='CLAUDE_PEERS_ROLE="frontend-dev" claude --dangerously-load-development-channels server:claude-peers'
+alias claude-backend='CLAUDE_PEERS_ROLE="backend-dev" claude --dangerously-load-development-channels server:claude-peers'
+```
+
+When a worker with a role starts, it automatically announces itself to any coordinator in the same repo. The coordinator sees the role in `list_peers` output — no manual introduction needed.
+
 ## CLI
 
 You can also inspect and interact from the command line:
@@ -111,6 +127,7 @@ bun cli.ts kill-broker       # stop the broker
 | -------------------- | -------------------- | ------------------------------------- |
 | `CLAUDE_PEERS_PORT`  | `7899`               | Broker port                           |
 | `CLAUDE_PEERS_DB`    | `~/.claude-peers.db` | SQLite database path                  |
+| `CLAUDE_PEERS_ROLE`  | `""`                 | Peer role for auto-identification              |
 | `OPENAI_API_KEY`     | —                    | Enables auto-summary via gpt-5.4-nano |
 
 ## Requirements
