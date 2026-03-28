@@ -48,54 +48,59 @@ export function generateAppleScript(config: SpawnConfig): string {
   // Escape backslashes and quotes for AppleScript string literals
   const escapeCwd = cwd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
+  // cd command to set working directory (since surface configuration is unreliable)
+  const cdCmd = `cd "${escapeCwd}"`;
+
   const lines: string[] = [
     'tell application "Ghostty"',
     "  activate",
-    "  set cfg to make new surface configuration",
-    `  set initial working directory of cfg to "${escapeCwd}"`,
     "",
   ];
 
   if (roles.length === 1) {
     lines.push(
-      "  set t1 to new tab in front window with configuration cfg",
-      `  input text "${escapeAS(commands[0])}" to t1`,
+      "  set newTab to new tab in front window",
+      "  set t1 to focused terminal of newTab",
+      `  input text "${escapeAS(cdCmd)} && ${escapeAS(commands[0])}" to t1`,
       '  send key "enter" to t1',
     );
   } else if (roles.length === 2) {
     lines.push(
-      "  set t1 to new tab in front window with configuration cfg",
-      "  set t2 to split t1 direction right with configuration cfg",
-      `  input text "${escapeAS(commands[0])}" to t1`,
+      "  set newTab to new tab in front window",
+      "  set t1 to focused terminal of newTab",
+      "  set t2 to split t1 direction right",
+      `  input text "${escapeAS(cdCmd)} && ${escapeAS(commands[0])}" to t1`,
       '  send key "enter" to t1',
-      `  input text "${escapeAS(commands[1])}" to t2`,
+      `  input text "${escapeAS(cdCmd)} && ${escapeAS(commands[1])}" to t2`,
       '  send key "enter" to t2',
     );
   } else if (roles.length === 3) {
     lines.push(
-      "  set t1 to new tab in front window with configuration cfg",
-      "  set t2 to split t1 direction right with configuration cfg",
-      "  set t3 to split t1 direction down with configuration cfg",
-      `  input text "${escapeAS(commands[0])}" to t1`,
+      "  set newTab to new tab in front window",
+      "  set t1 to focused terminal of newTab",
+      "  set t2 to split t1 direction right",
+      "  set t3 to split t1 direction down",
+      `  input text "${escapeAS(cdCmd)} && ${escapeAS(commands[0])}" to t1`,
       '  send key "enter" to t1',
-      `  input text "${escapeAS(commands[1])}" to t2`,
+      `  input text "${escapeAS(cdCmd)} && ${escapeAS(commands[1])}" to t2`,
       '  send key "enter" to t2',
-      `  input text "${escapeAS(commands[2])}" to t3`,
+      `  input text "${escapeAS(cdCmd)} && ${escapeAS(commands[2])}" to t3`,
       '  send key "enter" to t3',
     );
   } else if (roles.length >= 4) {
     lines.push(
-      "  set t1 to new tab in front window with configuration cfg",
-      "  set t2 to split t1 direction right with configuration cfg",
-      "  set t3 to split t1 direction down with configuration cfg",
-      "  set t4 to split t2 direction down with configuration cfg",
-      `  input text "${escapeAS(commands[0])}" to t1`,
+      "  set newTab to new tab in front window",
+      "  set t1 to focused terminal of newTab",
+      "  set t2 to split t1 direction right",
+      "  set t3 to split t1 direction down",
+      "  set t4 to split t2 direction down",
+      `  input text "${escapeAS(cdCmd)} && ${escapeAS(commands[0])}" to t1`,
       '  send key "enter" to t1',
-      `  input text "${escapeAS(commands[1])}" to t2`,
+      `  input text "${escapeAS(cdCmd)} && ${escapeAS(commands[1])}" to t2`,
       '  send key "enter" to t2',
-      `  input text "${escapeAS(commands[2])}" to t3`,
+      `  input text "${escapeAS(cdCmd)} && ${escapeAS(commands[2])}" to t3`,
       '  send key "enter" to t3',
-      `  input text "${escapeAS(commands[3])}" to t4`,
+      `  input text "${escapeAS(cdCmd)} && ${escapeAS(commands[3])}" to t4`,
       '  send key "enter" to t4',
     );
   }

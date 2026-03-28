@@ -27,8 +27,9 @@ test("generateAppleScript for 1 peer", () => {
 
   expect(script).toContain('tell application "Ghostty"');
   expect(script).toContain("activate");
-  expect(script).toContain('set initial working directory of cfg to "/tmp/project"');
+  expect(script).toContain('cd \\"/tmp/project\\"');
   expect(script).toContain("new tab in front window");
+  expect(script).toContain("focused terminal of newTab");
   expect(script).toContain("frontend-dev");
   expect(script).not.toContain("split");
   expect(script).toContain("end tell");
@@ -41,6 +42,7 @@ test("generateAppleScript for 2 peers creates right split", () => {
   };
   const script = generateAppleScript(config);
 
+  expect(script).toContain("focused terminal of newTab");
   expect(script).toContain("split t1 direction right");
   expect(script).toContain("frontend-dev");
   expect(script).toContain("backend-dev");
