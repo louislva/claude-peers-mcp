@@ -8,6 +8,7 @@ export interface Peer {
   git_root: string | null;
   tty: string | null;
   summary: string;
+  role: string;
   registered_at: string; // ISO timestamp
   last_seen: string; // ISO timestamp
 }
@@ -29,6 +30,7 @@ export interface RegisterRequest {
   git_root: string | null;
   tty: string | null;
   summary: string;
+  role: string;
 }
 
 export interface RegisterResponse {
