@@ -61,7 +61,9 @@ bun test
 
 ### MCP Tools Exposed
 
-`list_peers`, `send_message`, `set_summary`, `check_messages` — defined in server.ts TOOLS array.
+`list_peers`, `send_message`, `set_summary`, `check_messages`, `spawn_peers` — defined in server.ts TOOLS array.
+
+- **spawn_peers** — Opens Ghostty terminal splits and starts Claude Code instances with assigned roles. Uses AppleScript API (macOS, Ghostty 1.3+). Spawner logic in `shared/spawner.ts`.
 
 ## Key Design Decisions
 

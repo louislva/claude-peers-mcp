@@ -31,6 +31,7 @@ import {
   getGitBranch,
   getRecentFiles,
 } from "./shared/summarize.ts";
+import { spawnPeersInGhostty } from "./shared/spawner.ts";
 
 // --- Configuration ---
 
@@ -228,6 +229,33 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "spawn_peers",
+    description:
+      "Spawn Claude Code instances in Ghostty terminal splits with assigned roles. Opens a new tab, splits it based on peer count (2=side by side, 3=L-shape, 4=grid), and starts each Claude with the given role. macOS + Ghostty 1.3+ required.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        roles: {
+          type: "array" as const,
+          items: { type: "string" as const },
+          description:
+            'Roles to assign to spawned peers (e.g. ["frontend-dev", "backend-dev"]). Max 4.',
+        },
+        prompt: {
+          type: "string" as const,
+          description:
+            "Optional startup prompt sent to each spawned Claude instance via --prompt flag.",
+        },
+        working_directory: {
+          type: "string" as const,
+          description:
+            "Working directory for spawned instances. Defaults to this instance's CWD.",
+        },
+      },
+      required: ["roles"],
+    },
+  },
 ];
 
 // --- Tool handlers ---
@@ -389,6 +417,45 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             {
               type: "text" as const,
               text: `Error checking messages: ${e instanceof Error ? e.message : String(e)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "spawn_peers": {
+      const { roles, prompt, working_directory } = args as {
+        roles: string[];
+        prompt?: string;
+        working_directory?: string;
+      };
+      try {
+        const result = await spawnPeersInGhostty({
+          roles,
+          cwd: working_directory ?? myCwd,
+          prompt,
+        });
+        if (!result.ok) {
+          return {
+            content: [{ type: "text" as const, text: `Failed to spawn peers: ${result.error}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Spawned ${result.spawned_roles!.length} peer(s) in Ghostty: ${result.spawned_roles!.join(", ")}`,
+            },
+          ],
+        };
+      } catch (e) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error spawning peers: ${e instanceof Error ? e.message : String(e)}`,
             },
           ],
           isError: true,
