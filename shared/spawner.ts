@@ -25,9 +25,9 @@ export interface SpawnResult {
 export function buildClaudeCommand(role: string, prompt?: string): string {
   let cmd = `CLAUDE_PEERS_ROLE="${role}" claude --dangerously-skip-permissions --dangerously-load-development-channels server:claude-peers`;
   if (prompt) {
-    // Escape double quotes in prompt
-    const escaped = prompt.replace(/"/g, '\\"');
-    cmd += ` --prompt "${escaped}"`;
+    // Escape single quotes in prompt for shell safety
+    const escaped = prompt.replace(/'/g, "'\\''");
+    cmd += ` '${escaped}'`;
   }
   return cmd;
 }

@@ -10,15 +10,16 @@ test("buildClaudeCommand with role only", () => {
   expect(cmd).not.toContain("--prompt");
 });
 
-test("buildClaudeCommand with prompt", () => {
+test("buildClaudeCommand with prompt as positional arg", () => {
   const cmd = buildClaudeCommand("backend-dev", "Koordinatöre bağlan");
   expect(cmd).toContain('CLAUDE_PEERS_ROLE="backend-dev"');
-  expect(cmd).toContain('--prompt "Koordinatöre bağlan"');
+  expect(cmd).toContain("server:claude-peers 'Koordinatöre bağlan'");
+  expect(cmd).not.toContain("--prompt");
 });
 
-test("buildClaudeCommand escapes quotes in prompt", () => {
-  const cmd = buildClaudeCommand("dev", 'say "hello"');
-  expect(cmd).toContain('--prompt "say \\"hello\\""');
+test("buildClaudeCommand escapes single quotes in prompt", () => {
+  const cmd = buildClaudeCommand("dev", "it's a test");
+  expect(cmd).toContain("'it'\\''s a test'");
 });
 
 test("generateAppleScript for 1 peer", () => {
@@ -78,7 +79,7 @@ test("generateAppleScript for 4 peers creates 2x2 grid", () => {
   expect(script.match(/split/g)?.length).toBe(3);
 });
 
-test("generateAppleScript with prompt includes --prompt flag", () => {
+test("generateAppleScript with prompt includes positional arg", () => {
   const config: SpawnConfig = {
     roles: ["frontend-dev"],
     cwd: "/tmp/project",
@@ -86,7 +87,7 @@ test("generateAppleScript with prompt includes --prompt flag", () => {
   };
   const script = generateAppleScript(config);
 
-  expect(script).toContain("--prompt");
+  expect(script).not.toContain("--prompt");
   expect(script).toContain("Görevini al");
 });
 
