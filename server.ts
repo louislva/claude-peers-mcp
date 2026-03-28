@@ -39,6 +39,7 @@ const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
+const MY_ROLE = process.env.CLAUDE_PEERS_ROLE ?? "";
 
 // --- Broker communication ---
 
@@ -266,6 +267,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             `PID: ${p.pid}`,
             `CWD: ${p.cwd}`,
           ];
+          if (p.role) parts.push(`Role: ${p.role}`);
           if (p.git_root) parts.push(`Repo: ${p.git_root}`);
           if (p.tty) parts.push(`TTY: ${p.tty}`);
           if (p.summary) parts.push(`Summary: ${p.summary}`);
@@ -448,6 +450,23 @@ async function pollAndPushMessages() {
   }
 }
 
+// --- Coordinator helpers ---
+
+const COORDINATOR_ROLES = ["koordinator", "coordinator", "coord", "koordinatör"];
+
+export function findCoordinators(peers: Peer[]): Peer[] {
+  return peers.filter((p) =>
+    COORDINATOR_ROLES.includes(p.role.toLowerCase())
+  );
+}
+
+export function buildAnnounceMessage(role: string, cwd: string): string {
+  if (role) {
+    return `[auto-announce] Peer online oldu. Rol: ${role}, CWD: ${cwd}`;
+  }
+  return `[auto-announce] Peer online oldu. CWD: ${cwd}`;
+}
+
 // --- Startup ---
 
 async function main() {
@@ -494,9 +513,10 @@ async function main() {
     git_root: myGitRoot,
     tty,
     summary: initialSummary,
+    role: MY_ROLE,
   });
   myId = reg.id;
-  log(`Registered as peer ${myId}`);
+  log(`Registered as peer ${myId} (role: ${MY_ROLE || "(none)"})`);
 
   // If summary generation is still running, update it when done
   if (!initialSummary) {
@@ -516,10 +536,39 @@ async function main() {
   await mcp.connect(new StdioServerTransport());
   log("MCP connected");
 
-  // 6. Start polling for inbound messages
+  // 6. Auto-announce to coordinator(s)
+  if (MY_ROLE && myId) {
+    try {
+      const peers = await brokerFetch<Peer[]>("/list-peers", {
+        scope: myGitRoot ? "repo" : "directory",
+        cwd: myCwd,
+        git_root: myGitRoot,
+        exclude_id: myId,
+      });
+
+      const coordinators = findCoordinators(peers);
+      if (coordinators.length > 0) {
+        const announceMsg = buildAnnounceMessage(MY_ROLE, myCwd);
+        for (const coord of coordinators) {
+          await brokerFetch("/send-message", {
+            from_id: myId,
+            to_id: coord.id,
+            text: announceMsg,
+          });
+          log(`Auto-announced to coordinator ${coord.id} (role: ${coord.role})`);
+        }
+      } else {
+        log("No coordinator found for auto-announce");
+      }
+    } catch (e) {
+      log(`Auto-announce failed (non-critical): ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // 7. Start polling for inbound messages
   const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
 
-  // 7. Start heartbeat
+  // 8. Start heartbeat
   const heartbeatTimer = setInterval(async () => {
     if (myId) {
       try {
@@ -530,7 +579,7 @@ async function main() {
     }
   }, HEARTBEAT_INTERVAL_MS);
 
-  // 8. Clean up on exit
+  // 9. Clean up on exit
   const cleanup = async () => {
     clearInterval(pollTimer);
     clearInterval(heartbeatTimer);
@@ -549,7 +598,9 @@ async function main() {
   process.on("SIGTERM", cleanup);
 }
 
-main().catch((e) => {
-  log(`Fatal: ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((e) => {
+    log(`Fatal: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  });
+}
