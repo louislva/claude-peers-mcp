@@ -39,7 +39,7 @@
   5. Box-drawing borders, ANSI 256 colors, and status badges render correctly in the active tab
 **Plans**: 2 plans
 Plans:
-- [ ] 06-01-PLAN.md — Foundation modules: ANSI renderer, keypress parser, broker fetch helper
+- [x] 06-01-PLAN.md — Foundation modules: ANSI renderer, keypress parser, broker fetch helper
 - [ ] 06-02-PLAN.md — App shell, tab state machine, placeholder tabs, and main entry point
 
 ### Phase 7: GSD Watch Tab
@@ -89,7 +89,7 @@ Plans:
 | 3. Decision Proxy | v1.0 | 2/2 | Complete | 2026-03-25 |
 | 4. Orchestrator Workflow | v1.0 | 4/4 | Complete | 2026-03-25 |
 | 5. Runtime Module and Tests | v1.0 | 2/2 | Complete | 2026-03-25 |
-| 6. TUI Core | v1.1 | 0/2 | Planning | - |
+| 6. TUI Core | v1.1 | 1/2 | In Progress|  |
 | 7. GSD Watch Tab | v1.1 | 0/? | Not started | - |
 | 8. Broker Tabs and Endpoint | v1.1 | 0/? | Not started | - |
 | 9. Slash Commands | v1.1 | 0/? | Not started | - |

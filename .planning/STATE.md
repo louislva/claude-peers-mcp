@@ -2,14 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: comms-watch TUI Dashboard
-status: roadmap_ready
-stopped_at: null
-last_updated: "2026-03-30T00:00:00.000Z"
+status: executing
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-03-30T18:13:55.988Z"
+last_activity: 2026-03-30
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
+  percent: 0
 ---
 
 # Project State
@@ -19,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Multiple Claude Code instances can collaborate autonomously on GSD milestones without human intervention
-**Current focus:** v1.1 comms-watch TUI Dashboard — Phase 6: TUI Core (next up)
+**Current focus:** Phase 06 — tui-core
 
 ## Current Position
 
-Phase: Phase 6 (TUI Core) — not started
-Plan: --
-Status: Roadmap ready, awaiting first plan
-Last activity: 2026-03-30 -- Roadmap created for v1.1
+Phase: 06 (tui-core) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-03-30
 
 ```
 Progress: [----------] 0% (0/4 phases)
@@ -55,6 +57,7 @@ Progress: [----------] 0% (0/4 phases)
 - Trend: --
 
 *Updated after each plan completion*
+| Phase 06 P01 | 2 | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -74,6 +77,8 @@ Recent decisions affecting current work:
 - [v1.1 TUI]: Messages tab uses new /list-messages endpoint (not /poll-messages) — read-only view, no ACK
 - [v1.1 TUI]: Slash commands placed in project .claude/commands/ directory
 - [v1.1 TUI]: /comms-watch uses same tmux split pattern as /gsd-watch — 35% width, right side, duplicate detection
+- [Phase 06]: ANSI 256-color only (not true color) per project decision for wider terminal compatibility
+- [Phase 06]: brokerFetch duplicated from cli.ts in tui/broker.ts per project convention (no cross-module imports)
 
 ### Pending Todos
 
@@ -85,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-30
-Stopped at: Roadmap created for v1.1 milestone
+Last session: 2026-03-30T18:13:55.986Z
+Stopped at: Completed 06-01-PLAN.md
 Resume file: None

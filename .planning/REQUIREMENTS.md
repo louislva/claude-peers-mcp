@@ -13,7 +13,7 @@ Requirements for the comms-watch TUI Dashboard milestone. Each maps to roadmap p
 - [ ] **TUI-02**: User can switch between 6 tabs via number keys (1-6) and Tab/Shift+Tab
 - [ ] **TUI-03**: TUI auto-refreshes data on configurable intervals (2s broker polling, 5s stats, event-driven for GSD Watch)
 - [ ] **TUI-04**: TUI handles terminal resize (SIGWINCH) without corruption
-- [ ] **TUI-05**: TUI renders box-drawing borders, ANSI 256 colors, and status badges
+- [x] **TUI-05**: TUI renders box-drawing borders, ANSI 256 colors, and status badges
 
 ### GSD Watch Tab
 
@@ -77,7 +77,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TUI-02 | Phase 6 | Pending |
 | TUI-03 | Phase 6 | Pending |
 | TUI-04 | Phase 6 | Pending |
-| TUI-05 | Phase 6 | Pending |
+| TUI-05 | Phase 6 | Complete |
 | GSDW-01 | Phase 7 | Pending |
 | GSDW-02 | Phase 7 | Pending |
 | GSDW-03 | Phase 7 | Pending |
