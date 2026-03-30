@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: comms-watch TUI Dashboard
-status: defining_requirements
+status: roadmap_ready
 stopped_at: null
 last_updated: "2026-03-30T00:00:00.000Z"
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -19,20 +19,24 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Multiple Claude Code instances can collaborate autonomously on GSD milestones without human intervention
-**Current focus:** v1.1 comms-watch TUI Dashboard — defining requirements
+**Current focus:** v1.1 comms-watch TUI Dashboard — Phase 6: TUI Core (next up)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Phase 6 (TUI Core) — not started
 Plan: --
-Status: Defining requirements
-Last activity: 2026-03-30 -- Milestone v1.1 started
+Status: Roadmap ready, awaiting first plan
+Last activity: 2026-03-30 -- Roadmap created for v1.1
+
+```
+Progress: [----------] 0% (0/4 phases)
+```
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 0 (v1.1)
 - Average duration: --
 - Total execution time: 0 hours
 
@@ -40,7 +44,10 @@ Last activity: 2026-03-30 -- Milestone v1.1 started
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 6. TUI Core | TBD | - | - |
+| 7. GSD Watch Tab | TBD | - | - |
+| 8. Broker Tabs and Endpoint | TBD | - | - |
+| 9. Slash Commands | TBD | - | - |
 
 **Recent Trend:**
 
@@ -48,19 +55,6 @@ Last activity: 2026-03-30 -- Milestone v1.1 started
 - Trend: --
 
 *Updated after each plan completion*
-| Phase 01-foundation P01 | 2 min | 2 tasks | 1 files |
-| Phase 01-foundation P02 | 4 min | 3 tasks | 2 files |
-| Phase 02-executor-protocol P01 | 5 min | 1 tasks | 1 files |
-| Phase 02-executor-protocol P02 | 2 min | 1 tasks | 1 files |
-| Phase 02-executor-protocol P03 | 5 | 1 tasks | 1 files |
-| Phase 03-decision-proxy P01 | 1 min | 1 tasks | 1 files |
-| Phase 03-decision-proxy P02 | 3 | 2 tasks | 2 files |
-| Phase 04-orchestrator-workflow P01 | 15 | 2 tasks | 2 files |
-| Phase 04-orchestrator-workflow P02 | 9 | 3 tasks | 2 files |
-| Phase 04-orchestrator-workflow P04 | 2 | 1 tasks | 1 files |
-| Phase 04-orchestrator-workflow P03 | 2 | 2 tasks | 2 files |
-| Phase 05-runtime-module-and-tests P02 | 3 | 2 tasks | 2 files |
-| Phase 05-runtime-module-and-tests P01 | 4 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -74,42 +68,12 @@ Recent decisions affecting current work:
 - Architecture: Decision proxy as dedicated peer role — separates "understanding the user" from "planning/coordinating"
 - Architecture: Single branch per wave — simpler than per-executor branches; conflict-check prevents file overlap
 - Architecture: Filesystem-first context handoff — executors read plan files from git, not message payloads
-- [Phase 01-foundation]: BlockedReason uses 7 specific literals rather than free-form string for typed error handling
-- [Phase 01-foundation]: BRKR-02 satisfied without code changes: broker.ts taskCompleteTxn already counts failed as terminal
-- [Phase 01-foundation]: PeerAvailabilityResponse groups by repo_peers + machine_peers for same-repo-first peer discovery
-- [Phase 01-foundation]: expandFilesForConflictCheck uses empty string dir prefix (not "./") for root-level files to ensure path consistency
-- [Phase 01-foundation]: Both sides of conflict-check comparison are expanded enabling implicit-conflict detection for barrel exports
-- [Phase 02-executor-protocol P01]: readProcessOutput reads proc stream after exited to avoid blocking; stdout pipe used for SHA capture in handleReclaim
-- [Phase 02-executor-protocol P01]: gitPushWithJitter applies jitter twice (before first push and before retry) to spread concurrent executor pushes
-- [Phase 02-executor-protocol P01]: handleReclaim push is fire-and-forget — reclaim status response sent regardless of push result
-- [Phase 02-executor-protocol P01]: callTaskComplete returns full broker response including wave_completed flag for orchestrator handoff
-- [Phase 02-executor-protocol P02]: Executor doc uses imperative voice and delegates all broker/git calls to executor-helpers.ts by function name
-- [Phase 02-executor-protocol P02]: Sequential task processing mandated (no subagents) to preserve interrupt capability for status_request and reclaim_task
-- [Phase 02-executor-protocol]: Dynamic import in beforeAll used so CLAUDE_PEERS_PORT env override takes effect before module-level BROKER_URL constant is evaluated
-- [Phase 02-executor-protocol]: handleReclaim test uses /tmp (non-git dir) to verify fire-and-forget git failure path while confirming status message always sent
-- [Phase 03-decision-proxy P01]: waitForAnswer ACKs stale discuss_answer messages (wrong phase_number) inline during polling to prevent accumulation
-- [Phase 03-decision-proxy P01]: pollForChoices does NOT ACK — proxy agent must call ackMessages after processing to ensure at-least-once delivery
-- [Phase 03-decision-proxy P01]: parseChoicePayload validates only the 4 required fields; phase_goal and context treated as optional
-- [Phase 03-decision-proxy P02]: gsd-proxy.md uses 'Decision proxy -- answering discuss-phase choices for autonomous runs' as exact summary string for orchestrator peer discovery
-- [Phase 03-decision-proxy P02]: Proxy ACKs discuss_choice immediately (before evaluation) to prevent re-delivery during ANSWERING state
-- [Phase 03-decision-proxy P02]: appendDecision called BEFORE sendAnswer in proxy protocol — audit trail written even if broker send fails
-- [Phase 04-orchestrator-workflow]: brokerFetch duplicated inside orchestrator-helpers.ts (not imported cross-module) per established per-module self-contained pattern
-- [Phase 04-orchestrator-workflow]: parseRoadmapPhases pre-scans overview section for [x] markers before section headers to correctly capture completed phase status
-- [Phase 04-orchestrator-workflow]: checkWaveConflicts uses local file-overlap matrix (not broker /conflict-check) — static planning-time analysis, no broker round trip
-- [Phase 04-orchestrator-workflow]: buildExecutionWaves only counts pending dependencies in inDegree — completed phases pre-satisfied and excluded from scheduling
-- [Phase 04-orchestrator-workflow]: dispatchWave checks /wave-status after /wave-create and skips non-pending tasks — idempotent on retry without double-dispatch
-- [Phase 04-orchestrator-workflow]: Executors own /task-start — dispatchWave sends execute_phase message only; executor calls /task-start when it begins work
-- [Phase 04-orchestrator-workflow]: waitForWaveComplete drains message queue before checking stale timestamps — prevents false reclaims when progress messages are pending
-- [Phase 04-orchestrator-workflow]: shouldDelegate uses filesModified.length < 3 as proxy for 'fewer than 3 tasks' heuristic — avoids plan-file reads at dispatch time
-- [Phase 04-orchestrator-workflow]: ORCH-12 comment added to zero-peers test to explicitly link test intent to sequential fallback requirement
-- [Phase 04-orchestrator-workflow]: shouldDelegate boundary test at exactly 3 files confirms the inclusive lower bound (< 3 operator, not <= 3)
-- [Phase 04-orchestrator-workflow]: Planning is always sequential (orchestrator only) — concurrent planning causes dependency context loss
-- [Phase 04-orchestrator-workflow]: Executor owns /task-start transition — orchestrator anti-pattern documented in gsd-orchestrator.md
-- [Phase 04-orchestrator-workflow]: Sequential fallback (ORCH-12): zero executors AND no proxy triggers standard autonomous workflow with no orchestrator helpers
-- [Phase 05-runtime-module-and-tests]: Mixed-state test uses process.pid for idle peer and process.ppid for busy peer — broker deduplicates by PID on /register so two distinct live PIDs are required
-- [Phase 05-runtime-module-and-tests]: autonomous-peers-runtime.ts has zero imports from sibling modules to prevent circular deps
-- [Phase 05-runtime-module-and-tests]: brokerFetch duplicated in runtime module per established per-module self-contained pattern
-- [Phase 05-runtime-module-and-tests]: Unused type imports removed from orchestrator-helpers.ts after extraction
+- [v1.1 TUI]: Zero new dependencies — raw ANSI escape codes only, no blessed/ink/terminal-kit
+- [v1.1 TUI]: ANSI 256-color (not true color) for wider terminal compatibility
+- [v1.1 TUI]: No compiled binary for v1.1 — run via `bun tui/main.ts`; compilation deferred to v2
+- [v1.1 TUI]: Messages tab uses new /list-messages endpoint (not /poll-messages) — read-only view, no ACK
+- [v1.1 TUI]: Slash commands placed in project .claude/commands/ directory
+- [v1.1 TUI]: /comms-watch uses same tmux split pattern as /gsd-watch — 35% width, right side, duplicate detection
 
 ### Pending Todos
 
@@ -117,11 +81,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 4 (Orchestrator Workflow): ROADMAP.md dependency format may not include explicit dependency declarations in GSD-generated roadmaps. Confirm actual format before writing the parser; may need to fall back to LLM inference with mandatory cycle detection. Research flag noted in SUMMARY.md.
-- Phase 2/4 (Git strategy): Single-branch-per-wave with push jitter vs git worktrees — design doc specifies single-branch; research recommends worktrees for robustness. Needs deliberate decision during Phase 2 design.
+- Phase 8 (Broker Tabs): Waves tab needs a wave ID to call /wave-status. TUI will need to discover active wave IDs — likely via a stats-style call or by storing IDs seen in the message feed. Confirm approach during Phase 8 planning.
 
 ## Session Continuity
 
-Last session: 2026-03-25T19:21:39.089Z
-Stopped at: Completed 05-runtime-module-and-tests-01-PLAN.md
+Last session: 2026-03-30
+Stopped at: Roadmap created for v1.1 milestone
 Resume file: None

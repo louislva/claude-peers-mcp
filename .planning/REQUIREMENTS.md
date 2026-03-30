@@ -73,32 +73,32 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TUI-01 | Pending | Pending |
-| TUI-02 | Pending | Pending |
-| TUI-03 | Pending | Pending |
-| TUI-04 | Pending | Pending |
-| TUI-05 | Pending | Pending |
-| GSDW-01 | Pending | Pending |
-| GSDW-02 | Pending | Pending |
-| GSDW-03 | Pending | Pending |
-| GSDW-04 | Pending | Pending |
-| BRKR-01 | Pending | Pending |
-| BRKR-02 | Pending | Pending |
-| BRKR-03 | Pending | Pending |
-| BRKR-04 | Pending | Pending |
-| BRKR-05 | Pending | Pending |
-| ENDP-01 | Pending | Pending |
-| CMD-01 | Pending | Pending |
-| CMD-02 | Pending | Pending |
-| CMD-03 | Pending | Pending |
-| CMD-04 | Pending | Pending |
-| CMD-05 | Pending | Pending |
+| TUI-01 | Phase 6 | Pending |
+| TUI-02 | Phase 6 | Pending |
+| TUI-03 | Phase 6 | Pending |
+| TUI-04 | Phase 6 | Pending |
+| TUI-05 | Phase 6 | Pending |
+| GSDW-01 | Phase 7 | Pending |
+| GSDW-02 | Phase 7 | Pending |
+| GSDW-03 | Phase 7 | Pending |
+| GSDW-04 | Phase 7 | Pending |
+| BRKR-01 | Phase 8 | Pending |
+| BRKR-02 | Phase 8 | Pending |
+| BRKR-03 | Phase 8 | Pending |
+| BRKR-04 | Phase 8 | Pending |
+| BRKR-05 | Phase 8 | Pending |
+| ENDP-01 | Phase 8 | Pending |
+| CMD-01 | Phase 9 | Pending |
+| CMD-02 | Phase 9 | Pending |
+| CMD-03 | Phase 9 | Pending |
+| CMD-04 | Phase 9 | Pending |
+| CMD-05 | Phase 9 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 19 total
-- Mapped to phases: 0
-- Unmapped: 19
+- Mapped to phases: 19
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-03-30 after initial definition*
+*Last updated: 2026-03-30 after roadmap creation (traceability complete)*
