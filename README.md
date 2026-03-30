@@ -3,14 +3,31 @@
 Let your Claude Code instances find each other and talk. When you're running 5 sessions across different projects, any Claude can discover the others and send messages that arrive instantly.
 
 ```
-  Terminal 1 (poker-engine)          Terminal 2 (eel)
-  +------------------------+          +----------------------+
-  | Claude A               |          | Claude B             |
-  | "send a message to     |  ------> |                      |
-  |  peer xyz: what files  |          | <channel> arrives    |
-  |  are you editing?"     |  <------ |  instantly, Claude B |
-  |                        |          |  responds            |
-  +------------------------+          +----------------------+
+                        +---------------------------+
+                        |  broker daemon            |
+                        |  localhost:7899 + SQLite  |
+                        +------+---------+----------+
+                               |         |
+         +-----------+---------+---------+---------+-----------+
+         |           |         |         |         |           |
+     MCP server  MCP server  MCP server  ...   comms-watch   CLI
+     (Claude A)  (Claude B)  (Claude C)         (TUI)
+         |           |         |                   |
+     Terminal 1  Terminal 2  Terminal 3         tmux pane
+     (project-x) (project-y) (executor)
+         |           |         |
+         +-----+-----+---------+
+               |
+     +-------------------+
+     |  /comms-watch     |
+     |  6-tab TUI:       |
+     |  GSD Watch        |
+     |  Peers            |
+     |  Waves            |
+     |  Tasks            |
+     |  Messages         |
+     |  Stats            |
+     +-------------------+
 ```
 
 ---
@@ -187,7 +204,7 @@ The other Claude receives it immediately and responds.
 
 ## How it works
 
-A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code session spawns an MCP server that registers with the broker and polls for messages every second. Inbound messages are pushed into the session via the [claude/channel](https://code.claude.com/docs/en/channels-reference) protocol, so Claude sees them immediately.
+A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code session spawns an MCP server that registers with the broker and polls for messages every second. Inbound messages are pushed into the session via the [claude/channel](https://code.claude.com/docs/en/channels-reference) protocol, so Claude sees them immediately. The **comms-watch TUI** connects to the same broker for real-time visibility.
 
 ```
                     +---------------------------+
@@ -195,13 +212,16 @@ A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude
                     |  localhost:7899 + SQLite  |
                     +------+--------------+-----+
                            |              |
-                      MCP server A   MCP server B
-                      (stdio)        (stdio)
-                           |              |
-                      Claude A        Claude B
+               +-----------+-----------+--+-----------+
+               |           |           |              |
+          MCP server A  MCP server B  MCP server C  comms-watch
+          (stdio)       (stdio)       (stdio)       (TUI)
+               |           |           |              |
+          Claude A     Claude B    Claude C      tmux pane
+          (orchestr.)  (executor)  (executor)   [6-tab dashboard]
 ```
 
-The broker auto-launches when the first session starts. It cleans up dead peers automatically. Everything is localhost-only.
+The broker auto-launches when the first session starts. It cleans up dead peers automatically. Everything is localhost-only. The TUI (`bun tui/main.ts`) polls the broker HTTP API to display peers, waves, tasks, messages, and stats in real time.
 
 ## Auto-summary
 
