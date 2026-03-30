@@ -19,8 +19,11 @@ import type {
   SendMessageRequest,
   PollMessagesRequest,
   PollMessagesResponse,
+  ListMessagesRequest,
+  ListWavesResponse,
   Peer,
   Message,
+  Wave,
   PeerAvailabilityRequest,
   PeerAvailabilityResponse,
   AvailablePeer,
@@ -177,6 +180,18 @@ const selectUndelivered = db.prepare(`
 const markDelivered = db.prepare(`
   UPDATE messages SET delivered = 1, delivered_at = ? WHERE id = ?
 `);
+
+const selectRecentMessages = db.prepare(
+  `SELECT * FROM messages ORDER BY sent_at DESC LIMIT ?`
+);
+
+const selectAllWaves = db.prepare(
+  `SELECT w.*,
+    (SELECT COUNT(*) FROM task_assignments WHERE wave_id = w.id) as task_count,
+    (SELECT COUNT(*) FROM task_assignments WHERE wave_id = w.id AND status = 'completed') as tasks_completed,
+    (SELECT COUNT(*) FROM task_assignments WHERE wave_id = w.id AND status = 'running') as tasks_running
+  FROM waves w ORDER BY w.created_at DESC`
+);
 
 // --- Session prepared statements ---
 
@@ -839,6 +854,20 @@ function handleAckMessage(body: { message_ids: number[] }): { ok: boolean } {
   return { ok: true };
 }
 
+// --- List messages handler (read-only, all messages regardless of delivery status) ---
+
+function handleListMessages(body: ListMessagesRequest): Message[] {
+  const limit = Math.min(Math.max((body.limit ?? 50), 1), 200);
+  return selectRecentMessages.all(limit) as Message[];
+}
+
+// --- List waves handler (all waves with task count aggregates) ---
+
+function handleListWaves(): ListWavesResponse {
+  const waves = selectAllWaves.all() as Array<Wave & { task_count: number; tasks_completed: number; tasks_running: number }>;
+  return { waves };
+}
+
 // --- HTTP Server ---
 
 Bun.serve({
@@ -904,6 +933,14 @@ Bun.serve({
           return Response.json(handleConflictCheck(body as { wave_id: number; files: string[] }));
         case "/peer-availability":
           return Response.json(handlePeerAvailability(body as PeerAvailabilityRequest));
+
+        // --- List messages (read-only, all regardless of delivery status) ---
+        case "/list-messages":
+          return Response.json(handleListMessages(body as ListMessagesRequest));
+
+        // --- List waves (all waves with task count aggregates) ---
+        case "/list-waves":
+          return Response.json(handleListWaves());
 
         // --- Message ACK ---
         case "/ack-message":

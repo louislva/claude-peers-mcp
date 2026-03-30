@@ -118,6 +118,14 @@ export interface PollMessagesResponse {
   messages: Message[];
 }
 
+export interface ListMessagesRequest {
+  limit?: number; // default 50, max 200
+}
+
+export interface ListWavesResponse {
+  waves: Array<Wave & { task_count: number; tasks_completed: number; tasks_running: number }>;
+}
+
 // --- Autonomous peer coordination types ---
 
 export type BlockedReason = "git_conflict" | "file_conflict" | "plan_not_found" | "test_failure" | "dependency_missing" | "permission_denied" | "unknown";
