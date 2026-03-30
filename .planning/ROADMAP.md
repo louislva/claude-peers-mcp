@@ -22,7 +22,7 @@
 
 - [x] **Phase 6: TUI Core** - Alternate-screen shell with tab switching, resize handling, and ANSI renderer (completed 2026-03-30)
 - [x] **Phase 7: GSD Watch Tab** - Live .planning/ tree view with fswatch and progress bar (completed 2026-03-30)
-- [ ] **Phase 8: Broker Tabs and Endpoint** - Five broker visualization tabs plus /list-messages endpoint
+- [x] **Phase 8: Broker Tabs and Endpoint** - Five broker visualization tabs plus /list-messages endpoint (completed 2026-03-30)
 - [ ] **Phase 9: Slash Commands** - Five project slash commands for inline broker access and TUI launch
 
 ## Phase Details
@@ -71,7 +71,7 @@ Plans:
 Plans:
 - [x] 08-01-PLAN.md — New broker endpoints (/list-messages, /list-waves) with integration tests
 - [x] 08-02-PLAN.md — Peers tab and Stats tab renderers
-- [ ] 08-03-PLAN.md — Waves, Tasks, and Messages tab renderers with human verification
+- [x] 08-03-PLAN.md — Waves, Tasks, and Messages tab renderers with human verification
 **UI hint**: yes
 
 ### Phase 9: Slash Commands
@@ -97,5 +97,5 @@ Plans:
 | 5. Runtime Module and Tests | v1.0 | 2/2 | Complete | 2026-03-25 |
 | 6. TUI Core | v1.1 | 2/2 | Complete   | 2026-03-30 |
 | 7. GSD Watch Tab | v1.1 | 2/2 | Complete   | 2026-03-30 |
-| 8. Broker Tabs and Endpoint | v1.1 | 2/3 | In Progress|  |
+| 8. Broker Tabs and Endpoint | v1.1 | 3/3 | Complete   | 2026-03-30 |
 | 9. Slash Commands | v1.1 | 0/? | Not started | - |
