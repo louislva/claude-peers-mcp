@@ -50,6 +50,7 @@ switch (cmd) {
             git_root: string | null;
             tty: string | null;
             summary: string;
+            workspace: string | null;
             last_seen: string;
           }>
         >("/list-peers", {
@@ -62,6 +63,7 @@ switch (cmd) {
         for (const p of peers) {
           console.log(`  ${p.id}  PID:${p.pid}  ${p.cwd}`);
           if (p.summary) console.log(`         ${p.summary}`);
+          if (p.workspace) console.log(`         Workspace: ${p.workspace}`);
           if (p.tty) console.log(`         TTY: ${p.tty}`);
           console.log(`         Last seen: ${p.last_seen}`);
         }
@@ -82,6 +84,7 @@ switch (cmd) {
           git_root: string | null;
           tty: string | null;
           summary: string;
+          workspace: string | null;
           last_seen: string;
         }>
       >("/list-peers", {
@@ -96,6 +99,7 @@ switch (cmd) {
         for (const p of peers) {
           const parts = [`${p.id}  PID:${p.pid}  ${p.cwd}`];
           if (p.summary) parts.push(`  Summary: ${p.summary}`);
+          if (p.workspace) parts.push(`  Workspace: ${p.workspace}`);
           console.log(parts.join("\n"));
         }
       }
