@@ -276,6 +276,31 @@ Without the API key, Claude sets its own summary via the `set_summary` tool.
 
 A terminal dashboard built with raw ANSI escape codes — zero external dependencies. Monitors both GSD project status and broker state in a single 6-tab interface.
 
+```
++--[ comms-watch ]-----------------------------------------------+
+| 1 GSD Watch  2 Peers  3 Waves  4 Tasks  5 Messages  6 Stats   |
++----------------------------------------------------------------+
+|                                                                |
+|  v1.1 comms-watch TUI Dashboard                                |
+|                                                                |
+|  v [DONE] Phase 06: TUI Core                    2 plans        |
+|  |-- [OK] 06-01: ANSI renderer, input, broker                 |
+|  |-- [OK] 06-02: App shell, tabs, main entry                  |
+|  v [DONE] Phase 07: GSD Watch Tab                2 plans       |
+|  |-- [OK] 07-01: Tree parser + fs.watch                       |
+|  |-- [OK] 07-02: Tree renderer + navigation                   |
+|  > [DONE] Phase 08: Broker Tabs + Endpoint       3 plans       |
+|  > [DONE] Phase 09: Slash Commands               2 plans       |
+|                                                                |
+|  [||||||||||||||||||||] 100% (9/9 plans)                       |
+|                                                                |
++----------------------------------------------------------------+
+| BROKER OK  127.0.0.1:7899  |  q:quit  ?:help  1-6:tabs       |
++----------------------------------------------------------------+
+```
+
+> **Interactive preview:** Open [`docs/tui-preview.html`](docs/tui-preview.html) in a browser to see all 6 tabs with clickable navigation and sample data.
+
 ```bash
 bun tui/main.ts              # launch the TUI directly
 bun tui/main.ts --no-emoji   # ASCII-only mode (for SSH/minimal terminals)
