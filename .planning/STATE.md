@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: comms-watch TUI Dashboard
-status: executing
-stopped_at: "Completed 09-01-PLAN.md (Slash Commands: /comms-watch and /comms-kill)"
-last_updated: "2026-03-30T20:09:51.782Z"
+status: verifying
+stopped_at: "Completed 09-02-PLAN.md (Slash Commands: /comms-peers, /comms-send, /comms-stats)"
+last_updated: "2026-03-30T20:13:08.757Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 
 Phase: 09 (slash-commands) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-03-30
 
 ```
@@ -67,6 +67,7 @@ Progress: [----------] 0% (0/4 phases)
 | Phase 08-broker-tabs-and-endpoint P02 | 15 | 2 tasks | 2 files |
 | Phase 08-broker-tabs-and-endpoint P03 | 3 | 2 tasks | 3 files |
 | Phase 09-slash-commands P01 | 22 | 2 tasks | 2 files |
+| Phase 09-slash-commands P02 | 75 | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -108,6 +109,8 @@ Recent decisions affecting current work:
 - [Phase 08-broker-tabs-and-endpoint]: Messages tab uses /list-messages (read-only) not /poll-messages (ACK-based)
 - [Phase 09-slash-commands]: /comms-watch follows exact /gsd-watch pattern with printf pane title trick for duplicate detection
 - [Phase 09-slash-commands]: /comms-kill checks /health first for peer count before lsof + SIGTERM kill
+- [Phase 09-slash-commands]: /comms-peers, /comms-send, /comms-stats omit disable-model-invocation so Claude parses JSON and formats output readably
+- [Phase 09-slash-commands]: comms-send uses jq for safe JSON escaping of user-provided message text
 
 ### Pending Todos
 
@@ -119,6 +122,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-30T20:09:51.780Z
-Stopped at: Completed 09-01-PLAN.md (Slash Commands: /comms-watch and /comms-kill)
+Last session: 2026-03-30T20:13:08.755Z
+Stopped at: Completed 09-02-PLAN.md (Slash Commands: /comms-peers, /comms-send, /comms-stats)
 Resume file: None
