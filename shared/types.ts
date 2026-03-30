@@ -8,6 +8,7 @@ export interface Peer {
   git_root: string | null;
   tty: string | null;
   summary: string;
+  workspace: string | null;
   registered_at: string; // ISO timestamp
   last_seen: string; // ISO timestamp
 }
@@ -29,6 +30,7 @@ export interface RegisterRequest {
   git_root: string | null;
   tty: string | null;
   summary: string;
+  workspace: string | null;
 }
 
 export interface RegisterResponse {
@@ -45,11 +47,12 @@ export interface SetSummaryRequest {
 }
 
 export interface ListPeersRequest {
-  scope: "machine" | "directory" | "repo";
+  scope: "machine" | "directory" | "repo" | "workspace";
   // The requesting peer's context (used for filtering)
   cwd: string;
   git_root: string | null;
   exclude_id?: PeerId;
+  workspace?: string | null;
 }
 
 export interface SendMessageRequest {
@@ -64,4 +67,16 @@ export interface PollMessagesRequest {
 
 export interface PollMessagesResponse {
   messages: Message[];
+}
+
+export interface BroadcastRequest {
+  from_id: PeerId;
+  workspace: string;
+  text: string;
+}
+
+export interface BroadcastResponse {
+  ok: boolean;
+  sent_to: number;
+  error?: string;
 }
