@@ -20,7 +20,7 @@
 
 ### v1.1 comms-watch TUI Dashboard
 
-- [ ] **Phase 6: TUI Core** - Alternate-screen shell with tab switching, resize handling, and ANSI renderer
+- [x] **Phase 6: TUI Core** - Alternate-screen shell with tab switching, resize handling, and ANSI renderer (completed 2026-03-30)
 - [ ] **Phase 7: GSD Watch Tab** - Live .planning/ tree view with fswatch and progress bar
 - [ ] **Phase 8: Broker Tabs and Endpoint** - Five broker visualization tabs plus /list-messages endpoint
 - [ ] **Phase 9: Slash Commands** - Five project slash commands for inline broker access and TUI launch
@@ -40,7 +40,7 @@
 **Plans**: 2 plans
 Plans:
 - [x] 06-01-PLAN.md — Foundation modules: ANSI renderer, keypress parser, broker fetch helper
-- [ ] 06-02-PLAN.md — App shell, tab state machine, placeholder tabs, and main entry point
+- [x] 06-02-PLAN.md — App shell, tab state machine, placeholder tabs, and main entry point
 
 ### Phase 7: GSD Watch Tab
 **Goal**: Users can monitor GSD project progress in real time from the TUI without switching windows
@@ -89,7 +89,7 @@ Plans:
 | 3. Decision Proxy | v1.0 | 2/2 | Complete | 2026-03-25 |
 | 4. Orchestrator Workflow | v1.0 | 4/4 | Complete | 2026-03-25 |
 | 5. Runtime Module and Tests | v1.0 | 2/2 | Complete | 2026-03-25 |
-| 6. TUI Core | v1.1 | 1/2 | In Progress|  |
+| 6. TUI Core | v1.1 | 2/2 | Complete   | 2026-03-30 |
 | 7. GSD Watch Tab | v1.1 | 0/? | Not started | - |
 | 8. Broker Tabs and Endpoint | v1.1 | 0/? | Not started | - |
 | 9. Slash Commands | v1.1 | 0/? | Not started | - |

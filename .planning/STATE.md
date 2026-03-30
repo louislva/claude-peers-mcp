@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: comms-watch TUI Dashboard
-status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-03-30T18:13:55.988Z"
+status: verifying
+stopped_at: "Completed 06-02-PLAN.md (checkpoint:human-verify at task 3)"
+last_updated: "2026-03-30T18:18:45.556Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 
 Phase: 06 (tui-core) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-03-30
 
 ```
@@ -58,6 +58,7 @@ Progress: [----------] 0% (0/4 phases)
 
 *Updated after each plan completion*
 | Phase 06 P01 | 2 | 3 tasks | 3 files |
+| Phase 06-tui-core P02 | 4 | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,8 @@ Recent decisions affecting current work:
 - [v1.1 TUI]: /comms-watch uses same tmux split pattern as /gsd-watch — 35% width, right side, duplicate detection
 - [Phase 06]: ANSI 256-color only (not true color) per project decision for wider terminal compatibility
 - [Phase 06]: brokerFetch duplicated from cli.ts in tui/broker.ts per project convention (no cross-module imports)
+- [Phase 06-tui-core]: REFRESH_MS=0 for GSD Watch tab — event-driven via fs.watch in Phase 7, not polling
+- [Phase 06-tui-core]: onQuit callback pattern decouples App from exitAltScreen — main.ts owns terminal lifecycle
 
 ### Pending Todos
 
@@ -90,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-30T18:13:55.986Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-03-30T18:18:45.552Z
+Stopped at: Completed 06-02-PLAN.md (checkpoint:human-verify at task 3)
 Resume file: None
