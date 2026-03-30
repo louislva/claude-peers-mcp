@@ -17,10 +17,10 @@ Requirements for the comms-watch TUI Dashboard milestone. Each maps to roadmap p
 
 ### GSD Watch Tab
 
-- [ ] **GSDW-01**: Tree view displays milestone > phases > plans hierarchy from .planning/ directory
-- [ ] **GSDW-02**: Phase/plan status badges update live via fs.watch() on .planning/ directory
-- [ ] **GSDW-03**: User can expand/collapse tree nodes with Enter, expand/collapse all with e/w
-- [ ] **GSDW-04**: Progress bar shows completed plans / total plans with percentage
+- [x] **GSDW-01**: Tree view displays milestone > phases > plans hierarchy from .planning/ directory
+- [x] **GSDW-02**: Phase/plan status badges update live via fs.watch() on .planning/ directory
+- [x] **GSDW-03**: User can expand/collapse tree nodes with Enter, expand/collapse all with e/w
+- [x] **GSDW-04**: Progress bar shows completed plans / total plans with percentage
 
 ### Broker Tabs
 
@@ -78,10 +78,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TUI-03 | Phase 6 | Complete |
 | TUI-04 | Phase 6 | Complete |
 | TUI-05 | Phase 6 | Complete |
-| GSDW-01 | Phase 7 | Pending |
-| GSDW-02 | Phase 7 | Pending |
-| GSDW-03 | Phase 7 | Pending |
-| GSDW-04 | Phase 7 | Pending |
+| GSDW-01 | Phase 7 | Complete |
+| GSDW-02 | Phase 7 | Complete |
+| GSDW-03 | Phase 7 | Complete |
+| GSDW-04 | Phase 7 | Complete |
 | BRKR-01 | Phase 8 | Pending |
 | BRKR-02 | Phase 8 | Pending |
 | BRKR-03 | Phase 8 | Pending |
