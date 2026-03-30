@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: comms-watch TUI Dashboard
 status: executing
-stopped_at: Completed 08-01-PLAN.md (Broker List Endpoints)
-last_updated: "2026-03-30T19:23:48.285Z"
+stopped_at: Completed 08-02-PLAN.md (Peers and Stats Tabs)
+last_updated: "2026-03-30T19:27:34.177Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 ## Current Position
 
 Phase: 08 (broker-tabs-and-endpoint) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-03-30
 
@@ -64,6 +64,7 @@ Progress: [----------] 0% (0/4 phases)
 | Phase 07-gsd-watch-tab P02 | 3 | 1 tasks | 1 files |
 | Phase 07-gsd-watch-tab P02 | 15 | 2 tasks | 2 files |
 | Phase 08-broker-tabs-and-endpoint P01 | 3 | 2 tasks | 3 files |
+| Phase 08-broker-tabs-and-endpoint P02 | 15 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,9 @@ Recent decisions affecting current work:
 - [Phase 07-gsd-watch-tab]: Bug fix: app.ts was not calling tab.start() — added await tab.start() in App.start() loop
 - [Phase 08-broker-tabs-and-endpoint]: /list-messages uses sent_at DESC ordering so TUI shows newest messages first
 - [Phase 08-broker-tabs-and-endpoint]: selectAllWaves uses correlated subqueries for task count aggregates to avoid extra round trips
+- [Phase 08-broker-tabs-and-endpoint]: Peers tab uses fire-and-forget fetchData() via lastRenderArgs pattern — consistent with established gsd-watch.ts pattern
+- [Phase 08-broker-tabs-and-endpoint]: Stats tab fetches /stats and /health in parallel via Promise.all — single async round-trip for both endpoints
+- [Phase 08-broker-tabs-and-endpoint]: Role badge detection uses case-insensitive substring matching on peer.summary (orchestrat/execut/proxy keywords)
 
 ### Pending Todos
 
@@ -109,6 +113,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-30T19:23:48.283Z
-Stopped at: Completed 08-01-PLAN.md (Broker List Endpoints)
+Last session: 2026-03-30T19:27:34.175Z
+Stopped at: Completed 08-02-PLAN.md (Peers and Stats Tabs)
 Resume file: None

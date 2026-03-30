@@ -24,15 +24,15 @@ Requirements for the comms-watch TUI Dashboard milestone. Each maps to roadmap p
 
 ### Broker Tabs
 
-- [ ] **BRKR-01**: Peers tab shows live peer list with role badges (ORCH/EXEC/PROXY), PID, summary, last_seen
+- [x] **BRKR-01**: Peers tab shows live peer list with role badges (ORCH/EXEC/PROXY), PID, summary, last_seen
 - [ ] **BRKR-02**: Waves tab shows wave-by-wave breakdown with dependency info and task status per wave
 - [ ] **BRKR-03**: Tasks tab shows flat task table with wave, executor, files, status, duration
 - [ ] **BRKR-04**: Messages tab shows recent message feed with type badges, from/to routing, and timestamps
-- [ ] **BRKR-05**: Stats tab shows DB size, row counts, retention policy, schema version, and broker health
+- [x] **BRKR-05**: Stats tab shows DB size, row counts, retention policy, schema version, and broker health
 
 ### Broker Endpoint
 
-- [ ] **ENDP-01**: POST /list-messages returns recent N messages regardless of delivery status (default 50, max 200)
+- [x] **ENDP-01**: POST /list-messages returns recent N messages regardless of delivery status (default 50, max 200)
 
 ### Slash Commands
 
@@ -82,12 +82,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GSDW-02 | Phase 7 | Complete |
 | GSDW-03 | Phase 7 | Complete |
 | GSDW-04 | Phase 7 | Complete |
-| BRKR-01 | Phase 8 | Pending |
+| BRKR-01 | Phase 8 | Complete |
 | BRKR-02 | Phase 8 | Pending |
 | BRKR-03 | Phase 8 | Pending |
 | BRKR-04 | Phase 8 | Pending |
-| BRKR-05 | Phase 8 | Pending |
-| ENDP-01 | Phase 8 | Pending |
+| BRKR-05 | Phase 8 | Complete |
+| ENDP-01 | Phase 8 | Complete |
 | CMD-01 | Phase 9 | Pending |
 | CMD-02 | Phase 9 | Pending |
 | CMD-03 | Phase 9 | Pending |
