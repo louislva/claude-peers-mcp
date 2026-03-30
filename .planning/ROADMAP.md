@@ -51,8 +51,10 @@ Plans:
   2. Editing a plan file causes the status badge for that plan to update within one second (fs.watch event-driven)
   3. Pressing Enter on a tree node toggles it collapsed/expanded; `e` expands all nodes; `w` collapses all nodes
   4. A progress bar at the bottom shows completed plans / total plans and a percentage that stays accurate as files change
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 2 plans
+Plans:
+- [ ] 07-01-PLAN.md — Tree parser, status derivation, fs.watch watcher, and unit tests
+- [ ] 07-02-PLAN.md — Tree renderer with expand/collapse navigation, progress bar, and human verification
 
 ### Phase 8: Broker Tabs and Endpoint
 **Goal**: Users can inspect all live broker state (peers, waves, tasks, messages, stats) from the TUI
@@ -90,6 +92,6 @@ Plans:
 | 4. Orchestrator Workflow | v1.0 | 4/4 | Complete | 2026-03-25 |
 | 5. Runtime Module and Tests | v1.0 | 2/2 | Complete | 2026-03-25 |
 | 6. TUI Core | v1.1 | 2/2 | Complete   | 2026-03-30 |
-| 7. GSD Watch Tab | v1.1 | 0/? | Not started | - |
+| 7. GSD Watch Tab | v1.1 | 0/2 | Planned | - |
 | 8. Broker Tabs and Endpoint | v1.1 | 0/? | Not started | - |
 | 9. Slash Commands | v1.1 | 0/? | Not started | - |
