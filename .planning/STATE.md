@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: comms-watch TUI Dashboard
 status: verifying
-stopped_at: "Checkpoint: 07-02 awaiting human verify of GSD Watch tab"
-last_updated: "2026-03-30T18:45:43.668Z"
+stopped_at: Completed 07-02-PLAN.md (GSD Watch Tab Renderer)
+last_updated: "2026-03-30T19:08:52.919Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 4
@@ -62,6 +62,7 @@ Progress: [----------] 0% (0/4 phases)
 | Phase 06-tui-core P02 | 30 | 3 tasks | 8 files |
 | Phase 07-gsd-watch-tab P01 | 4 | 1 tasks | 2 files |
 | Phase 07-gsd-watch-tab P02 | 3 | 1 tasks | 1 files |
+| Phase 07-gsd-watch-tab P02 | 15 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -92,6 +93,8 @@ Recent decisions affecting current work:
 - [Phase 07-gsd-watch-tab]: Parser-renderer separation: gsd-watch-parser.ts returns typed GsdTree; renderer (Plan 02) receives it as data
 - [Phase 07-02]: start() is async (Promise<void>) — compatible with TabDef void interface in TypeScript
 - [Phase 07-02]: lastRenderArgs pattern enables watcher-triggered re-renders without coupling to app.ts
+- [Phase 07-gsd-watch-tab]: lastRenderArgs pattern enables watcher-triggered re-renders without coupling gsd-watch.ts to app.ts
+- [Phase 07-gsd-watch-tab]: Bug fix: app.ts was not calling tab.start() — added await tab.start() in App.start() loop
 
 ### Pending Todos
 
@@ -103,6 +106,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-30T18:45:43.664Z
-Stopped at: Checkpoint: 07-02 awaiting human verify of GSD Watch tab
+Last session: 2026-03-30T19:08:52.915Z
+Stopped at: Completed 07-02-PLAN.md (GSD Watch Tab Renderer)
 Resume file: None

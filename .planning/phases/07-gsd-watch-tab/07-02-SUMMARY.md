@@ -51,10 +51,25 @@ Replaced `tui/tabs/gsd-watch.ts` placeholder with 457-line full implementation:
 | Task | Commit | Description |
 |------|--------|-------------|
 | Task 1: Implement GSD Watch tab | c3a9b1c | feat(07-02): implement GSD Watch tab with live tree view |
+| Bug fix: git root + tab.start() | 1df0115 | fix(07): resolve .planning/ from git root and call tab.start() on all tabs |
+| Checkpoint docs | bea4367 | docs(07-02): complete GSD Watch tab plan — awaiting human verify |
 
 ## Deviations from Plan
 
-None - plan executed exactly as written.
+### Auto-fixed Issues
+
+**1. [Rule 1 - Bug] app.ts not calling tab.start() on any tabs**
+- **Found during:** Bug fix after Task 1, pre-checkpoint
+- **Issue:** App.start() iterated TABS but never called `tab.start()`, so gsd-watch.ts never parsed the tree or started the watcher — display showed empty tree
+- **Fix:** Added `await (tab as any).start()` call in App.start() initialization loop in tui/app.ts; also fixed .planning/ resolution to walk up from git root
+- **Files modified:** tui/app.ts
+- **Verification:** TUI showed live tree with status badges; user approved at human-verify checkpoint
+- **Committed in:** 1df0115
+
+---
+
+**Total deviations:** 1 auto-fixed (Rule 1 - Bug)
+**Impact on plan:** Critical fix — without it the tab always showed empty tree. No scope creep.
 
 ## Verification Instructions (Task 2: Human Verify)
 
@@ -76,8 +91,16 @@ The checkpoint requires running `bun tui/main.ts` and verifying the GSD Watch ta
 
 None - the tab is fully wired to real data via `parseGsdTree(planningDir)` and `watchPlanning`.
 
+## Human Verification
+
+**Status:** APPROVED by user (2026-03-30)
+
+The GSD Watch tab was verified working after the app.ts bug fix. User confirmed approval.
+
 ## Self-Check: PASSED
 
-- FOUND: tui/tabs/gsd-watch.ts (457 lines, min_lines 100 requirement met)
+- FOUND: tui/tabs/gsd-watch.ts (457+ lines, min_lines 100 requirement met)
+- FOUND: tui/app.ts (fixed to call tab.start())
 - FOUND: .planning/phases/07-gsd-watch-tab/07-02-SUMMARY.md
 - FOUND: commit c3a9b1c (feat(07-02): implement GSD Watch tab with live tree view)
+- FOUND: commit 1df0115 (fix(07): resolve .planning/ from git root and call tab.start() on all tabs)
