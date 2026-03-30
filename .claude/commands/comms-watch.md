@@ -39,8 +39,8 @@ Then stop. Do not continue to step 4.
 
 **Step 4 — Spawn comms-watch in a new right-side pane:**
 
-Run: `tmux split-window -h -p 35 -d "cd \"$PWD\" && printf '\\033]2;comms-watch: %s\\033\\\\' \"$PWD\" && bun tui/main.ts"`
+Run: `tmux split-window -h -p 35 -d "cd \"$PWD\" && printf '\\033]2;comms-watch: %s\\033\\\\' \"$PWD\" && bun $HOME/dev/claude-peers-mcp/tui/main.ts"`
 
-The `-h` flag creates a right-side vertical split. The `-p 35` sets the new pane to 35% of the current pane width. The `-d` flag keeps focus on the original pane. The `cd "$PWD"` ensures the TUI runs from the correct project directory. The `printf` sets the pane title to `comms-watch: /path` so duplicate detection in Step 3 works on subsequent invocations.
+The `-h` flag creates a right-side vertical split. The `-p 35` sets the new pane to 35% of the current pane width. The `-d` flag keeps focus on the original pane. The `cd "$PWD"` ensures the TUI resolves `.planning/` from the current project directory. The `$HOME/dev/claude-peers-mcp/tui/main.ts` absolute path ensures this works from any repo.
 
 Then print: `comms-watch sidebar opened.`
