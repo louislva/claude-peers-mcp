@@ -23,13 +23,13 @@ Let your Claude Code instances find each other and talk. When you're running 5 s
 
 ---
 
-## What gsd-comms adds beyond GSD v1
+## What gsd-comms adds beyond GSD
 
-GSD v1 runs one Claude Code instance at a time. Each session is isolated — no awareness of other running sessions, no coordination, no shared state. If you want two agents to collaborate, you're copy-pasting between terminals.
+GSD runs one Claude Code instance at a time. Each session is isolated — no awareness of other running sessions, no coordination, no shared state. If you want two agents to collaborate, you're copy-pasting between terminals.
 
 **gsd-comms-mcp changes that:**
 
-| Capability | GSD v1 | gsd-comms-mcp |
+| Capability | GSD (standalone) | gsd-comms-mcp |
 |---|---|---|
 | Peer discovery | None — sessions are blind to each other | `list_peers` finds all running instances by machine, directory, or repo |
 | Real-time messaging | None | `send_message` delivers instantly via channel push |
@@ -38,12 +38,75 @@ GSD v1 runs one Claude Code instance at a time. Each session is isolated — no 
 | Task conflict detection | None | File-level conflict checks prevent agents from editing the same files |
 | Wave orchestration | None | Create waves of parallel tasks with dependency tracking |
 | Session tracking | Temp files (fragile) | Durable session state with heartbeats and auto-cleanup |
+| Autonomous pipeline | Single-session sequential | Multi-peer orchestrated execution with tmux spawning |
 
 **The practical difference:** Two Claude instances can negotiate a work split, execute in parallel, and merge — like Mike and Sam did above — without human copy-paste in between.
 
-## Integrated SQLite State Management (from GSD v2)
+## Autonomous Pipeline (GSD-SDK + tmux)
 
-All coordination state lives in a single SQLite file (`~/.claude-peers.db`), replacing the temp files and scattered state of earlier approaches. This was introduced as part of the GSD v2 architecture.
+The autonomous pipeline (`/gsd:autonomous-peers`) turns a GSD milestone into a fully hands-off, multi-peer execution run. One orchestrator coordinates everything while executor peers do the actual work — all spawned and managed via tmux.
+
+### How it works
+
+```
+  tmux session
+  ┌──────────────────────────────────────────────────────────────┐
+  │ Orchestrator (main pane)                                     │
+  │  - Parses ROADMAP.md phases + dependencies                   │
+  │  - Builds topologically-sorted execution waves               │
+  │  - Plans each phase sequentially                             │
+  │  - Delegates execution to executor peers                     │
+  │                                                              │
+  ├──────────────────────────┬───────────────────────────────────┤
+  │ Executor A (spawned)     │ gsd-watch │ Executor B (spawned) │
+  │  - Receives execute_phase│ (sidebar) │  - Same flow          │
+  │  - Calls /task-start     │           │  - Independent phase  │
+  │  - Runs /gsd:execute-... │           │  - Commits directly   │
+  │  - Reports phase_complete│           │  - Reports back       │
+  └──────────────────────────┴───────────┴───────────────────────┘
+```
+
+### Architecture
+
+| Role | Description |
+|---|---|
+| **Orchestrator** | Single session that owns planning and coordination. Reads ROADMAP.md, resolves dependencies, creates broker waves, dispatches phases to executors. Never executes phases itself (unless no peers are available). |
+| **Executor** | Spawned Claude Code instances that receive `execute_phase` messages, run `/gsd:execute-phase`, and report completion back via the broker. Up to 3 concurrent executors. |
+| **Decision Proxy** | Optional peer primed with user preferences. When the orchestrator hits a `/gsd:discuss-phase` choice point, it asks the proxy instead of blocking for user input. |
+
+### Key features
+
+- **Dependency-aware waves** — Phases are grouped into waves using topological sort. Wave N only starts after Wave N-1 completes.
+- **File-conflict detection** — Phases that touch the same files are serialized into sub-waves automatically.
+- **Dynamic executor spawning** — If more phases need execution than peers are available, the orchestrator spawns new executor panes via tmux (capped at 3).
+- **Stale executor recovery** — 120s with no progress triggers a status probe. No response within 30s triggers task reclaim and reassignment.
+- **Graceful cleanup** — After the final wave, all spawned executor panes are shut down (Ctrl-C, wait, force kill).
+- **Sequential fallback** — No tmux? No peers? Falls back to standard sequential `/gsd:autonomous` automatically.
+
+### Running it
+
+```bash
+# Start inside tmux
+tmux new-session -s gsd
+
+# Launch Claude Code with peers channel
+claude --dangerously-skip-permissions --dangerously-load-development-channels server:gsd-comms
+
+# Then ask:
+#   /gsd:autonomous-peers
+```
+
+The orchestrator discovers peers, analyzes the roadmap, and starts dispatching. Each spawned executor gets a companion `gsd-watch` sidebar for live progress monitoring.
+
+### Requirements for autonomous mode
+
+- **tmux** — `sudo apt install tmux` (Linux) or `brew install tmux` (macOS). Without tmux, falls back to sequential.
+- **GSD v1.30.0+** — The autonomous pipeline uses the GSD-SDK orchestration helpers (`orchestrator-helpers.ts`, `tmux-manager.ts`).
+- **gsd-watch** (optional) — Live sidebar dashboard per executor. Install at `~/.local/bin/gsd-watch`.
+
+## Integrated SQLite State Management
+
+All coordination state lives in a single SQLite file (`~/.claude-peers.db`), replacing the temp files and scattered state of earlier approaches.
 
 **Why SQLite matters here:**
 
@@ -219,3 +282,5 @@ bun cli.ts kill-broker       # stop the broker
 - [Bun](https://bun.sh)
 - Claude Code v2.1.80+
 - claude.ai login (channels require it -- API key auth won't work)
+- [GSD v1.30.0+](https://github.com/gsd-build/get-shit-done) (for autonomous pipeline features)
+- tmux (optional — enables dynamic executor spawning for `/gsd:autonomous-peers`)

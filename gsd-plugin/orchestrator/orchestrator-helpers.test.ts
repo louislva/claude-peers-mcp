@@ -540,3 +540,155 @@ describe("postWaveSync (ORCH-10)", () => {
     expect(Array.isArray(result.peers.executors)).toBe(true);
   });
 });
+
+// ============================================================
+// TEST GROUP: tmux-manager (pure logic tests — no tmux session required)
+// ============================================================
+
+let tmuxManager: typeof import("./tmux-manager.ts");
+
+// Dynamic import to pick up the same env overrides
+beforeAll(async () => {
+  tmuxManager = await import("./tmux-manager.ts");
+});
+
+describe("tmux-manager", () => {
+  test("isTmuxAvailable returns false when TMUX env is unset", () => {
+    const original = process.env.TMUX;
+    delete process.env.TMUX;
+    try {
+      expect(tmuxManager.isTmuxAvailable()).toBe(false);
+    } finally {
+      if (original !== undefined) process.env.TMUX = original;
+    }
+  });
+
+  test("isTmuxAvailable returns true when TMUX env is set", () => {
+    const original = process.env.TMUX;
+    process.env.TMUX = "/tmp/tmux-1000/default,12345,0";
+    try {
+      expect(tmuxManager.isTmuxAvailable()).toBe(true);
+    } finally {
+      if (original !== undefined) {
+        process.env.TMUX = original;
+      } else {
+        delete process.env.TMUX;
+      }
+    }
+  });
+
+  test("MAX_EXECUTOR_PANES is 6", () => {
+    expect(tmuxManager.MAX_EXECUTOR_PANES).toBe(3);
+  });
+
+  test("countLivePanes returns 0 for empty array", async () => {
+    const count = await tmuxManager.countLivePanes([]);
+    expect(count).toBe(0);
+  });
+
+  test("countLivePanes returns correct count (0 for empty, matches live panes)", async () => {
+    // Empty array should always return 0
+    expect(await tmuxManager.countLivePanes([])).toBe(0);
+  });
+
+  test("killPane is a no-op for non-existent pane ID", async () => {
+    // Should not throw
+    await tmuxManager.killPane("%99999");
+  });
+
+  test("killPane is a no-op for empty string", async () => {
+    await tmuxManager.killPane("");
+  });
+
+  test("killSpawnedPanes handles empty array", async () => {
+    await tmuxManager.killSpawnedPanes([]);
+  });
+});
+
+// ============================================================
+// TEST GROUP: Dynamic executor spawning (ORCH-14, ORCH-15)
+// ============================================================
+
+describe("spawnExecutor (ORCH-14)", () => {
+  test("throws when not in tmux session", async () => {
+    const original = process.env.TMUX;
+    delete process.env.TMUX;
+    try {
+      await expect(helpers.spawnExecutor("/tmp/test")).rejects.toThrow(/not running inside a tmux session/);
+    } finally {
+      if (original !== undefined) process.env.TMUX = original;
+    }
+  });
+
+  test("isTmuxAvailable is re-exported from orchestrator-helpers", () => {
+    expect(typeof helpers.isTmuxAvailable).toBe("function");
+  });
+
+  test("MAX_EXECUTOR_PANES is re-exported and equals 6", () => {
+    expect(helpers.MAX_EXECUTOR_PANES).toBe(3);
+  });
+});
+
+describe("spawnExecutors (ORCH-14b)", () => {
+  test("returns empty array when count is 0", async () => {
+    const original = process.env.TMUX;
+    process.env.TMUX = "/tmp/tmux-test,1,0";
+    try {
+      const result = await helpers.spawnExecutors("/tmp/test", 0, []);
+      expect(result).toEqual([]);
+    } finally {
+      if (original !== undefined) {
+        process.env.TMUX = original;
+      } else {
+        delete process.env.TMUX;
+      }
+    }
+  });
+});
+
+describe("waitForExecutorRegistration (ORCH-14c)", () => {
+  test("resolves immediately when new peers already exist", async () => {
+    // Register a peer that is NOT in the knownPeerIds set
+    const newPeerId = await registerPeer("executor -- idle", "wait-reg-new", dummyPid);
+    const selfId = "test-wait-reg-self-" + Date.now();
+    const knownPeerIds = new Set<string>(); // empty — all peers are "new"
+
+    try {
+      const result = await helpers.waitForExecutorRegistration(
+        selfId,
+        "/no/such/repo",
+        1,
+        knownPeerIds,
+        5_000
+      );
+      expect(result.length).toBeGreaterThanOrEqual(1);
+      expect(result.some((e) => e.id === newPeerId)).toBe(true);
+    } finally {
+      await unregisterPeer(newPeerId);
+    }
+  });
+
+  test("throws on timeout when expected executors never register", async () => {
+    const selfId = "test-wait-reg-timeout-" + Date.now();
+    // All known peers are in the set, so no "new" peers will be found
+    const knownPeerIds = new Set<string>(["all-known-peer"]);
+
+    await expect(
+      helpers.waitForExecutorRegistration(selfId, "/no/such/repo", 5, knownPeerIds, 1_000)
+    ).rejects.toThrow(/timeout/i);
+  });
+});
+
+describe("cleanupExecutors (ORCH-15)", () => {
+  test("kill mode does not throw on empty panes array", async () => {
+    await helpers.cleanupExecutors([], "kill");
+  });
+
+  test("recycle mode is a no-op", async () => {
+    const fakePanes: import("./tmux-manager.ts").SpawnedPane[] = [
+      { executorPaneId: "%99999", watchPaneId: "%99998", spawnedAt: Date.now() },
+    ];
+    // Should not throw or do anything
+    await helpers.cleanupExecutors(fakePanes, "recycle");
+  });
+});

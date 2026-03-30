@@ -6,10 +6,10 @@
  * Kahn's algorithm wave grouping, conflict-based sub-wave serialization,
  * wave dispatch, monitoring, recovery, and post-wave sync.
  *
- * Covers: ORCH-01 through ORCH-13
+ * Covers: ORCH-01 through ORCH-15
  */
 
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import type {
   PeerId,
   AvailablePeer,
@@ -512,5 +512,147 @@ export async function postWaveSync(
   const peers = await discoverPeers(myId, gitRoot);
 
   return { roadmapContent, peers };
+}
+
+// --- Dynamic executor spawning (ORCH-14, ORCH-15) ---
+
+import {
+  isTmuxAvailable,
+  spawnExecutorPane,
+  killSpawnedPanes,
+  countLivePanes,
+  MAX_EXECUTOR_PANES,
+  type SpawnedPane,
+} from "./tmux-manager.ts";
+
+// Re-export for consumer convenience
+export { isTmuxAvailable, MAX_EXECUTOR_PANES, type SpawnedPane } from "./tmux-manager.ts";
+
+/**
+ * ORCH-14: Spawn a new executor peer as a tmux pane with gsd-watch sidebar.
+ *
+ * Resolves the agent path and MCP config relative to the claude-peers-mcp
+ * installation, then delegates to tmux-manager.
+ *
+ * Does NOT wait for broker registration — call waitForExecutorRegistration()
+ * after spawning all needed executors.
+ *
+ * @param gitRoot - Project git root directory
+ * @returns SpawnedPane metadata
+ * @throws If not running inside tmux
+ */
+export async function spawnExecutor(gitRoot: string): Promise<SpawnedPane> {
+  if (!isTmuxAvailable()) {
+    throw new Error("Cannot spawn executor: not running inside a tmux session");
+  }
+
+  // Resolve agent path relative to this module's location
+  const moduleDir = dirname(new URL(import.meta.url).pathname);
+  const agentPath = join(moduleDir, "..", "agents", "gsd-executor.md");
+
+  // Use project .mcp.json if it exists
+  const mcpConfigPath = join(gitRoot, ".mcp.json");
+  const mcpExists = await Bun.file(mcpConfigPath).exists();
+
+  return spawnExecutorPane(
+    gitRoot,
+    agentPath,
+    mcpExists ? mcpConfigPath : undefined
+  );
+}
+
+/**
+ * ORCH-14b: Spawn multiple executors, respecting the MAX_EXECUTOR_PANES cap.
+ *
+ * @param gitRoot - Project git root directory
+ * @param count - Number of executors to spawn
+ * @param existingPanes - Already-alive spawned panes (used for cap calculation)
+ * @returns Array of newly spawned panes
+ */
+export async function spawnExecutors(
+  gitRoot: string,
+  count: number,
+  existingPanes: SpawnedPane[] = []
+): Promise<SpawnedPane[]> {
+  const liveCount = await countLivePanes(existingPanes);
+  const available = MAX_EXECUTOR_PANES - liveCount;
+  const toSpawn = Math.min(count, available);
+
+  if (toSpawn <= 0) return [];
+
+  const spawned: SpawnedPane[] = [];
+  for (let i = 0; i < toSpawn; i++) {
+    const pane = await spawnExecutor(gitRoot);
+    spawned.push(pane);
+    // Small delay between spawns to avoid tmux layout race conditions
+    if (i < toSpawn - 1) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+
+  return spawned;
+}
+
+/**
+ * ORCH-14c: Poll broker until the expected number of new executors have registered.
+ *
+ * Compares current peer list against a known set of pre-existing peer IDs.
+ * Returns as soon as the expected count is reached, or throws on timeout.
+ *
+ * @param myId - Orchestrator's peer ID (excluded from discovery)
+ * @param gitRoot - Git root for peer discovery scope
+ * @param expectedCount - How many NEW executors to wait for
+ * @param knownPeerIds - Set of peer IDs that existed BEFORE spawning
+ * @param timeoutMs - Max time to wait (default: 60s)
+ * @returns Array of newly registered AvailablePeer objects
+ * @throws Error if timeout reached before all executors register
+ */
+export async function waitForExecutorRegistration(
+  myId: PeerId,
+  gitRoot: string,
+  expectedCount: number,
+  knownPeerIds: Set<PeerId>,
+  timeoutMs: number = 60_000
+): Promise<AvailablePeer[]> {
+  const POLL_INTERVAL_MS = 3_000;
+  const startTime = Date.now();
+
+  while (true) {
+    const { executors } = await discoverPeers(myId, gitRoot);
+    const newExecutors = executors.filter((e) => !knownPeerIds.has(e.id));
+
+    if (newExecutors.length >= expectedCount) {
+      return newExecutors.slice(0, expectedCount);
+    }
+
+    const elapsed = Date.now() - startTime;
+    if (elapsed >= timeoutMs) {
+      throw new Error(
+        `Executor registration timeout: expected ${expectedCount}, got ${newExecutors.length} after ${Math.round(elapsed / 1000)}s`
+      );
+    }
+
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+}
+
+/**
+ * ORCH-15: Clean up spawned executor panes after a wave completes.
+ *
+ * - "kill" mode: terminate all panes immediately (last wave / error recovery)
+ * - "recycle" mode: keep panes alive for reuse in the next wave
+ *
+ * @param spawnedPanes - Panes to manage
+ * @param mode - "kill" to terminate, "recycle" to keep alive
+ */
+export async function cleanupExecutors(
+  spawnedPanes: SpawnedPane[],
+  mode: "kill" | "recycle"
+): Promise<void> {
+  if (mode === "kill") {
+    await killSpawnedPanes(spawnedPanes);
+  }
+  // "recycle" is a no-op — executors return to IDLE state naturally
+  // after completing their task, and gsd-peers-sync keeps them registered
 }
 

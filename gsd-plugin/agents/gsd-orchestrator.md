@@ -113,6 +113,25 @@ For each phase in this (sub-)wave, decide whether to delegate to an executor or 
    - Returns `false` (execute locally) when: no executors, fewer than 3 files modified, file overlap with running tasks, or has human-action checkpoint.
 4. If `shouldDelegate` returns `false`: add this phase to `localPhases`.
 
+### 5c.5. Dynamic Executor Spawning (ORCH-14)
+
+If more phases need delegation than executors are available, AND the orchestrator is running inside tmux, dynamically spawn executor peers:
+
+1. Calculate the deficit: `deficit = delegatedPhases.length - executors.length`
+2. Check `isTmuxAvailable()` — if not in tmux, skip spawning and proceed with available executors.
+3. Record existing peer IDs: `knownPeerIds = new Set(executors.map(e => e.id))`
+4. Call `spawnExecutors(gitRoot, deficit, allSpawnedPanes)` from orchestrator-helpers.ts.
+   - Caps at `MAX_EXECUTOR_PANES` (3) minus currently-alive spawned panes.
+   - Returns `SpawnedPane[]` — track these in `allSpawnedPanes` for later cleanup.
+   - Each spawned executor gets a Claude Code tmux pane + gsd-watch sidebar (25% width, `--no-emoji` mode).
+5. Call `waitForExecutorRegistration(myId, gitRoot, spawned.length, knownPeerIds, 60_000)` from orchestrator-helpers.ts.
+   - Polls `/peer-availability` every 3 seconds until new executors register.
+   - **On timeout:** log warning with count (e.g., "2 of 3 executors registered"). Kill unregistered panes via `cleanupExecutors(failedPanes, "kill")`. Proceed with however many executors ARE available.
+6. Add newly registered executors to the available executors list.
+7. Proceed to dispatch (5d) with the expanded executor pool.
+
+**If NOT in tmux:** skip this section entirely. Existing behavior (use available executors, excess phases go local) applies.
+
 ### 5d. Dispatch
 
 1. Call `dispatchWave(myId, gitRoot, waveNumber, delegatedPhases, executors)` from orchestrator-helpers.ts.
@@ -162,6 +181,21 @@ For each phase in this (sub-)wave, decide whether to delegate to an executor or 
 3. Update STATE.md: mark completed phases, advance current position.
 
 4. If ROADMAP.md has new dynamically-inserted phases: re-run `parseRoadmapPhases(roadmapContent)` and `buildExecutionWaves` on remaining pending phases.
+
+### 5f.5. Executor Cleanup (ORCH-15)
+
+After post-wave sync completes, manage spawned executor panes:
+
+1. **If this is the LAST wave** (no more waves remaining):
+   - Call `cleanupExecutors(allSpawnedPanes, "kill")` to terminate all executor panes and their gsd-watch sidebars.
+   - Watch panes are killed first (non-blocking), then executor panes get a graceful shutdown (Ctrl-C, 2s wait, force kill).
+
+2. **If more waves remain:**
+   - Call `cleanupExecutors(allSpawnedPanes, "recycle")` — this is a no-op.
+   - Executors return to IDLE state naturally after completing their task.
+   - The gsd-peers-sync hook keeps them registered with the broker.
+   - On the next wave, recycled executors will appear in `discoverPeers` as available.
+   - Before spawning new executors in 5c.5, the cap check (`countLivePanes`) accounts for recycled panes.
 
 ---
 
@@ -214,3 +248,8 @@ All broker calls, git operations, and protocol functions are in `gsd-plugin/orch
 | `shouldDelegate(phase, executorCount, runningFiles, hasHumanCheckpoint)` | Delegate vs local execution decision |
 | `sendDiscussChoice(myId, proxyId, choicePayload)` | Send discuss_choice to proxy peer |
 | `waitForAnswer(myId, phaseNumber)` | Wait up to 60s for proxy discuss_answer |
+| `isTmuxAvailable()` | Check if running inside a tmux session |
+| `spawnExecutor(gitRoot)` | Spawn one executor pane + gsd-watch sidebar |
+| `spawnExecutors(gitRoot, count, existingPanes)` | Spawn N executors, respecting MAX cap |
+| `waitForExecutorRegistration(myId, gitRoot, count, knownIds, timeout)` | Poll until new executors register |
+| `cleanupExecutors(spawnedPanes, mode)` | Kill or recycle spawned panes after wave |
