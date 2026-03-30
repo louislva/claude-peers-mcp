@@ -67,7 +67,11 @@ Plans:
   4. Tab 5 (Messages) shows the 50 most recent messages across all peers (type badge, from/to, text preview, timestamp) via the new /list-messages endpoint
   5. Tab 6 (Stats) shows DB row counts, DB size, retention policy, schema version, and broker health — refreshes every 5s
   6. POST /list-messages returns the most recent N messages (default 50, max 200) regardless of delivery status
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 08-01-PLAN.md — New broker endpoints (/list-messages, /list-waves) with integration tests
+- [ ] 08-02-PLAN.md — Peers tab and Stats tab renderers
+- [ ] 08-03-PLAN.md — Waves, Tasks, and Messages tab renderers with human verification
 **UI hint**: yes
 
 ### Phase 9: Slash Commands
@@ -93,5 +97,5 @@ Plans:
 | 5. Runtime Module and Tests | v1.0 | 2/2 | Complete | 2026-03-25 |
 | 6. TUI Core | v1.1 | 2/2 | Complete   | 2026-03-30 |
 | 7. GSD Watch Tab | v1.1 | 2/2 | Complete   | 2026-03-30 |
-| 8. Broker Tabs and Endpoint | v1.1 | 0/? | Not started | - |
+| 8. Broker Tabs and Endpoint | v1.1 | 0/3 | Not started | - |
 | 9. Slash Commands | v1.1 | 0/? | Not started | - |
