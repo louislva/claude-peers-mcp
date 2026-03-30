@@ -272,6 +272,53 @@ Without the API key, Claude sets its own summary via the `set_summary` tool.
 | POST | `/prune` | Trigger retention cleanup, returns pruned counts |
 | POST | `/vacuum` | WAL checkpoint + VACUUM to reclaim disk space |
 
+## comms-watch TUI Dashboard
+
+A terminal dashboard built with raw ANSI escape codes — zero external dependencies. Monitors both GSD project status and broker state in a single 6-tab interface.
+
+```bash
+bun tui/main.ts              # launch the TUI directly
+bun tui/main.ts --no-emoji   # ASCII-only mode (for SSH/minimal terminals)
+```
+
+Or from inside Claude Code (opens in a tmux split pane):
+
+```
+/comms-watch
+```
+
+### Tabs
+
+| Tab | Key | What it shows | Refresh |
+|-----|-----|---------------|---------|
+| GSD Watch | `1` | Milestone > phase > plan tree from `.planning/` | Event-driven (fs.watch) |
+| Peers | `2` | Active Claude instances with role badges (ORCH/EXEC/PROXY) | 2s |
+| Waves | `3` | Execution waves with per-task status | 2s |
+| Tasks | `4` | Flat task table with executor, files in-flight | 2s |
+| Messages | `5` | Recent message feed with type badges | 2s |
+| Stats | `6` | DB size, row counts, retention, broker health | 5s |
+
+### Keybindings
+
+| Key | Action |
+|-----|--------|
+| `1-6` | Switch tab |
+| `Tab` / `Shift+Tab` | Cycle tabs |
+| `j` / `k` | Scroll up/down |
+| `Enter` | Toggle expand/collapse (GSD Watch) |
+| `e` / `w` | Expand all / collapse all (GSD Watch) |
+| `q` / `Ctrl+C` | Quit (restores terminal) |
+
+### Slash commands
+
+| Command | What it does |
+|---------|-------------|
+| `/comms-watch` | Launch TUI in a tmux split pane (35% width, duplicate detection) |
+| `/comms-peers` | Print peer list inline (no TUI, no tmux) |
+| `/comms-send <id> <msg>` | Send a message to a peer |
+| `/comms-stats` | Print broker stats inline |
+| `/comms-kill` | Stop the broker daemon |
+
 ## CLI
 
 ```bash
