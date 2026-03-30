@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: comms-watch TUI Dashboard
-status: verifying
-stopped_at: "Completed 09-02-PLAN.md (Slash Commands: /comms-peers, /comms-send, /comms-stats)"
+status: milestone_complete
+stopped_at: "v1.1 milestone shipped 2026-03-30"
 last_updated: "2026-03-30T20:16:01.208Z"
 last_activity: 2026-03-30
 progress:
