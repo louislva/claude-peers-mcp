@@ -44,8 +44,13 @@ const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
 // Parse workspace from CLI args or environment variable
 function resolveWorkspace(): string | null {
   const wsArgIndex = process.argv.indexOf("--workspace");
-  if (wsArgIndex !== -1 && process.argv[wsArgIndex + 1]) {
-    return process.argv[wsArgIndex + 1] ?? null;
+  if (wsArgIndex !== -1) {
+    const value = process.argv[wsArgIndex + 1];
+    if (!value || value.startsWith("-")) {
+      log("--workspace flag requires a value");
+      process.exit(1);
+    }
+    return value;
   }
   return process.env.CLAUDE_PEERS_WORKSPACE ?? null;
 }

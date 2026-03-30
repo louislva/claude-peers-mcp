@@ -43,6 +43,10 @@ async function post<T = unknown>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    const errorBody = await res.text();
+    throw new Error(`POST ${path} failed with ${res.status}: ${errorBody}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -58,28 +62,32 @@ beforeAll(async () => {
   });
 
   // Wait for broker to be ready
+  let ready = false;
   for (let i = 0; i < 50; i++) {
     try {
       const res = await fetch(`${BASE_URL}/health`);
-      if (res.ok) break;
+      if (res.ok) { ready = true; break; }
     } catch {
       // not ready yet
     }
     await Bun.sleep(100);
   }
+  if (!ready) {
+    throw new Error(`Broker did not start within 5 seconds at ${BASE_URL}`);
+  }
 });
 
 afterAll(async () => {
-  brokerProc.kill();
-  await brokerProc.exited;
-  // Clean up test DB
-  try {
-    const { unlinkSync } = require("fs");
-    unlinkSync(TEST_DB);
-    unlinkSync(TEST_DB + "-wal");
-    unlinkSync(TEST_DB + "-shm");
-  } catch {
-    // ignore
+  if (brokerProc) {
+    brokerProc.kill();
+    await brokerProc.exited;
+  }
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      await Bun.$`rm -f ${TEST_DB}${suffix}`;
+    } catch {
+      // best effort cleanup
+    }
   }
 });
 
@@ -213,6 +221,10 @@ test("broadcast sends to all workspace members", async () => {
   expect(msgs2.messages.length).toBe(1);
   expect(msgs2.messages[0]!.text).toBe("hello everyone");
   expect(msgs2.messages[0]!.from_id).toBe(sender.id);
+
+  // Verify sender did NOT receive their own broadcast
+  const senderMsgs = await post<PollMessagesResponse>("/poll-messages", { id: sender.id });
+  expect(senderMsgs.messages.length).toBe(0);
 });
 
 test("broadcast to empty workspace returns error", async () => {

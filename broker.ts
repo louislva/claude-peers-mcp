@@ -51,8 +51,12 @@ db.run(`
 // Migration for existing DBs
 try {
   db.run("ALTER TABLE peers ADD COLUMN workspace TEXT DEFAULT NULL");
-} catch {
-  // Column already exists
+} catch (e) {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (!msg.includes("duplicate column name")) {
+    console.error(`[claude-peers broker] Migration failed: ${msg}`);
+    throw e;
+  }
 }
 
 db.run(`
@@ -241,17 +245,42 @@ function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
 }
 
 function handleBroadcast(body: BroadcastRequest): BroadcastResponse {
+  if (!body.from_id || !body.workspace || !body.text) {
+    return { ok: false, sent_to: 0, error: "Missing required fields: from_id, workspace, text" };
+  }
+
+  // Verify sender exists and belongs to the workspace
+  const sender = db.query("SELECT id, workspace FROM peers WHERE id = ?")
+    .get(body.from_id) as { id: string; workspace: string | null } | null;
+  if (!sender) {
+    return { ok: false, sent_to: 0, error: `Sender peer ${body.from_id} not found` };
+  }
+  if (sender.workspace !== body.workspace) {
+    return { ok: false, sent_to: 0, error: `Sender is not a member of workspace "${body.workspace}"` };
+  }
+
   const targets = (selectPeersByWorkspace.all(body.workspace) as Peer[])
-    .filter((p) => p.id !== body.from_id);
+    .filter((p) => p.id !== body.from_id)
+    .filter((p) => {
+      try {
+        process.kill(p.pid, 0);
+        return true;
+      } catch {
+        deletePeer.run(p.id);
+        return false;
+      }
+    });
 
   if (targets.length === 0) {
     return { ok: false, sent_to: 0, error: "No other peers in workspace" };
   }
 
   const now = new Date().toISOString();
-  for (const target of targets) {
-    insertMessage.run(body.from_id, target.id, body.text, now);
-  }
+  db.transaction(() => {
+    for (const target of targets) {
+      insertMessage.run(body.from_id, target.id, body.text, now);
+    }
+  })();
 
   return { ok: true, sent_to: targets.length };
 }
