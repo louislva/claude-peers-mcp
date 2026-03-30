@@ -25,9 +25,9 @@ Requirements for the comms-watch TUI Dashboard milestone. Each maps to roadmap p
 ### Broker Tabs
 
 - [x] **BRKR-01**: Peers tab shows live peer list with role badges (ORCH/EXEC/PROXY), PID, summary, last_seen
-- [ ] **BRKR-02**: Waves tab shows wave-by-wave breakdown with dependency info and task status per wave
-- [ ] **BRKR-03**: Tasks tab shows flat task table with wave, executor, files, status, duration
-- [ ] **BRKR-04**: Messages tab shows recent message feed with type badges, from/to routing, and timestamps
+- [x] **BRKR-02**: Waves tab shows wave-by-wave breakdown with dependency info and task status per wave
+- [x] **BRKR-03**: Tasks tab shows flat task table with wave, executor, files, status, duration
+- [x] **BRKR-04**: Messages tab shows recent message feed with type badges, from/to routing, and timestamps
 - [x] **BRKR-05**: Stats tab shows DB size, row counts, retention policy, schema version, and broker health
 
 ### Broker Endpoint
@@ -36,11 +36,11 @@ Requirements for the comms-watch TUI Dashboard milestone. Each maps to roadmap p
 
 ### Slash Commands
 
-- [ ] **CMD-01**: /comms-watch launches TUI in tmux split pane (35% width, right side, duplicate detection)
+- [x] **CMD-01**: /comms-watch launches TUI in tmux split pane (35% width, right side, duplicate detection)
 - [ ] **CMD-02**: /comms-peers prints inline formatted peer list (no TUI, no tmux required)
 - [ ] **CMD-03**: /comms-send <peer-id> <message> sends message to peer and reports success/failure inline
 - [ ] **CMD-04**: /comms-stats prints inline stats dump with row counts and retention policy
-- [ ] **CMD-05**: /comms-kill stops the broker daemon and confirms shutdown
+- [x] **CMD-05**: /comms-kill stops the broker daemon and confirms shutdown
 
 ## v2 Requirements
 
@@ -83,16 +83,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GSDW-03 | Phase 7 | Complete |
 | GSDW-04 | Phase 7 | Complete |
 | BRKR-01 | Phase 8 | Complete |
-| BRKR-02 | Phase 8 | Pending |
-| BRKR-03 | Phase 8 | Pending |
-| BRKR-04 | Phase 8 | Pending |
+| BRKR-02 | Phase 8 | Complete |
+| BRKR-03 | Phase 8 | Complete |
+| BRKR-04 | Phase 8 | Complete |
 | BRKR-05 | Phase 8 | Complete |
 | ENDP-01 | Phase 8 | Complete |
-| CMD-01 | Phase 9 | Pending |
+| CMD-01 | Phase 9 | Complete |
 | CMD-02 | Phase 9 | Pending |
 | CMD-03 | Phase 9 | Pending |
 | CMD-04 | Phase 9 | Pending |
-| CMD-05 | Phase 9 | Pending |
+| CMD-05 | Phase 9 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 19 total

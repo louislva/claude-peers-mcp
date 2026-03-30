@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: comms-watch TUI Dashboard
-status: verifying
-stopped_at: Completed 08-03-PLAN.md (Waves, Tasks, Messages Tabs) — awaiting human-verify checkpoint
-last_updated: "2026-03-30T19:40:35.655Z"
+status: executing
+stopped_at: "Completed 09-01-PLAN.md (Slash Commands: /comms-watch and /comms-kill)"
+last_updated: "2026-03-30T20:09:51.782Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 9
+  completed_plans: 8
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Multiple Claude Code instances can collaborate autonomously on GSD milestones without human intervention
-**Current focus:** Phase 08 — broker-tabs-and-endpoint
+**Current focus:** Phase 09 — slash-commands
 
 ## Current Position
 
-Phase: 9
-Plan: Not started
-Status: Phase complete — ready for verification
+Phase: 09 (slash-commands) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
 Last activity: 2026-03-30
 
 ```
@@ -66,6 +66,7 @@ Progress: [----------] 0% (0/4 phases)
 | Phase 08-broker-tabs-and-endpoint P01 | 3 | 2 tasks | 3 files |
 | Phase 08-broker-tabs-and-endpoint P02 | 15 | 2 tasks | 2 files |
 | Phase 08-broker-tabs-and-endpoint P03 | 3 | 2 tasks | 3 files |
+| Phase 09-slash-commands P01 | 22 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,8 @@ Recent decisions affecting current work:
 - [Phase 08-broker-tabs-and-endpoint]: Role badge detection uses case-insensitive substring matching on peer.summary (orchestrat/execut/proxy keywords)
 - [Phase 08-broker-tabs-and-endpoint]: Waves tab fetches /list-waves then /wave-status per wave — single sequential pass for simplicity
 - [Phase 08-broker-tabs-and-endpoint]: Messages tab uses /list-messages (read-only) not /poll-messages (ACK-based)
+- [Phase 09-slash-commands]: /comms-watch follows exact /gsd-watch pattern with printf pane title trick for duplicate detection
+- [Phase 09-slash-commands]: /comms-kill checks /health first for peer count before lsof + SIGTERM kill
 
 ### Pending Todos
 
@@ -116,6 +119,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-30T19:31:52.002Z
-Stopped at: Completed 08-03-PLAN.md (Waves, Tasks, Messages Tabs) — awaiting human-verify checkpoint
+Last session: 2026-03-30T20:09:51.780Z
+Stopped at: Completed 09-01-PLAN.md (Slash Commands: /comms-watch and /comms-kill)
 Resume file: None
