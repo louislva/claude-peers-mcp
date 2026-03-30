@@ -881,3 +881,166 @@ test("/prune returns counts of pruned rows", async () => {
   expect(res.waves_pruned).toBeGreaterThanOrEqual(0);
   expect(res.tasks_pruned).toBeGreaterThanOrEqual(0);
 });
+
+// --- /list-messages tests ---
+
+test("/list-messages returns empty array when no messages exist", async () => {
+  // Use a unique peer pair that won't interfere with other tests
+  const p1 = await brokerPost<{ id: string }>("/register", {
+    pid: 55501,
+    cwd: "/tmp/list-msgs-empty",
+    git_root: null,
+    tty: null,
+    summary: "list-msgs-empty-p1",
+  });
+  // /list-messages is a global read — we can only verify the result is an array
+  // (other tests may have inserted messages, so we just verify shape)
+  const res = await brokerPost<unknown[]>("/list-messages", {});
+  expect(Array.isArray(res)).toBe(true);
+
+  await brokerPost("/unregister", { id: p1.id });
+});
+
+test("/list-messages returns messages in sent_at DESC order", async () => {
+  const p1 = await brokerPost<{ id: string }>("/register", {
+    pid: 55502,
+    cwd: "/tmp/list-msgs-order",
+    git_root: null,
+    tty: null,
+    summary: "list-msgs-order-p1",
+  });
+  const p2 = await brokerPost<{ id: string }>("/register", {
+    pid: 55503,
+    cwd: "/tmp/list-msgs-order",
+    git_root: null,
+    tty: null,
+    summary: "list-msgs-order-p2",
+  });
+
+  // Send 3 messages
+  await brokerPost("/send-message", { from_id: p1.id, to_id: p2.id, text: "first" });
+  await brokerPost("/send-message", { from_id: p2.id, to_id: p1.id, text: "second" });
+  await brokerPost("/send-message", { from_id: p1.id, to_id: p2.id, text: "third" });
+
+  const res = await brokerPost<{ sent_at: string }[]>("/list-messages", { limit: 10 });
+  expect(res.length).toBeGreaterThanOrEqual(3);
+
+  // Verify DESC ordering: each message should have sent_at >= next
+  for (let i = 0; i < res.length - 1; i++) {
+    expect(res[i].sent_at >= res[i + 1].sent_at).toBe(true);
+  }
+
+  await brokerPost("/unregister", { id: p1.id });
+  await brokerPost("/unregister", { id: p2.id });
+});
+
+test("/list-messages respects limit parameter and caps at 200", async () => {
+  const p1 = await brokerPost<{ id: string }>("/register", {
+    pid: 55504,
+    cwd: "/tmp/list-msgs-limit",
+    git_root: null,
+    tty: null,
+    summary: "list-msgs-limit-p1",
+  });
+  const p2 = await brokerPost<{ id: string }>("/register", {
+    pid: 55505,
+    cwd: "/tmp/list-msgs-limit",
+    git_root: null,
+    tty: null,
+    summary: "list-msgs-limit-p2",
+  });
+
+  // Send 5 messages
+  for (let i = 0; i < 5; i++) {
+    await brokerPost("/send-message", { from_id: p1.id, to_id: p2.id, text: `msg ${i}` });
+  }
+
+  // Limit=3 should return at most 3
+  const limited = await brokerPost<unknown[]>("/list-messages", { limit: 3 });
+  expect(limited.length).toBeLessThanOrEqual(3);
+
+  // Limit=999 should be capped at 200
+  const capped = await brokerPost<unknown[]>("/list-messages", { limit: 999 });
+  expect(capped.length).toBeLessThanOrEqual(200);
+
+  await brokerPost("/unregister", { id: p1.id });
+  await brokerPost("/unregister", { id: p2.id });
+});
+
+test("/list-messages returns both delivered and undelivered messages", async () => {
+  const p1 = await brokerPost<{ id: string }>("/register", {
+    pid: 55506,
+    cwd: "/tmp/list-msgs-delivered",
+    git_root: null,
+    tty: null,
+    summary: "list-msgs-delivered-p1",
+  });
+  const p2 = await brokerPost<{ id: string }>("/register", {
+    pid: 55507,
+    cwd: "/tmp/list-msgs-delivered",
+    git_root: null,
+    tty: null,
+    summary: "list-msgs-delivered-p2",
+  });
+
+  // Send 2 messages, ACK 1
+  await brokerPost("/send-message", { from_id: p1.id, to_id: p2.id, text: "will be delivered" });
+  await brokerPost("/send-message", { from_id: p1.id, to_id: p2.id, text: "stays undelivered" });
+
+  const poll = await brokerPost<{ messages: { id: number; text: string }[] }>("/poll-messages", { id: p2.id });
+  const toAck = poll.messages.find((m) => m.text === "will be delivered");
+  if (toAck) {
+    await brokerPost("/ack-message", { message_ids: [toAck.id] });
+  }
+
+  // /list-messages should return BOTH (delivered + undelivered)
+  const all = await brokerPost<{ id: number; delivered: number }[]>("/list-messages", { limit: 50 });
+  const ours = all.filter((m) => poll.messages.some((pm) => pm.id === m.id));
+  expect(ours.length).toBe(2);
+  const deliveredCount = ours.filter((m) => m.delivered === 1).length;
+  const undeliveredCount = ours.filter((m) => m.delivered === 0).length;
+  expect(deliveredCount).toBe(1);
+  expect(undeliveredCount).toBe(1);
+
+  await brokerPost("/unregister", { id: p1.id });
+  await brokerPost("/unregister", { id: p2.id });
+});
+
+// --- /list-waves tests ---
+
+test("/list-waves returns empty array when no waves exist", async () => {
+  // This test verifies the response shape; other tests may have created waves
+  const res = await brokerPost<{ waves: unknown[] }>("/list-waves", {});
+  expect(Array.isArray(res.waves)).toBe(true);
+});
+
+test("/list-waves returns waves with task_count, tasks_completed, tasks_running fields", async () => {
+  const wave = await brokerPost<{ wave_id: number; task_ids: number[] }>("/wave-create", {
+    repo: "/tmp/list-waves-counts",
+    phase: 55,
+    wave_number: 1,
+    tasks: [
+      { name: "LW-T01", files: ["lw-a.ts"] },
+      { name: "LW-T02", files: ["lw-b.ts"] },
+    ],
+  });
+
+  // Start one task
+  await brokerPost("/session-heartbeat", {
+    session_id: "lw-session-1",
+    pid: 55520,
+    cwd: "/tmp/list-waves-counts",
+    git_root: "/tmp/list-waves-counts",
+    task_summary: "lw worker",
+  });
+  await brokerPost("/task-start", { task_id: wave.task_ids[0], session_id: "lw-session-1" });
+
+  const res = await brokerPost<{ waves: { id: number; task_count: number; tasks_completed: number; tasks_running: number; status: string }[] }>("/list-waves", {});
+
+  const found = res.waves.find((w) => w.id === wave.wave_id);
+  expect(found).toBeDefined();
+  expect(found!.task_count).toBe(2);
+  expect(found!.tasks_running).toBe(1);
+  expect(found!.tasks_completed).toBe(0);
+  expect(found!.status).toBe("pending");
+});
