@@ -69,7 +69,7 @@ Plans:
   6. POST /list-messages returns the most recent N messages (default 50, max 200) regardless of delivery status
 **Plans**: 3 plans
 Plans:
-- [ ] 08-01-PLAN.md — New broker endpoints (/list-messages, /list-waves) with integration tests
+- [x] 08-01-PLAN.md — New broker endpoints (/list-messages, /list-waves) with integration tests
 - [ ] 08-02-PLAN.md — Peers tab and Stats tab renderers
 - [ ] 08-03-PLAN.md — Waves, Tasks, and Messages tab renderers with human verification
 **UI hint**: yes

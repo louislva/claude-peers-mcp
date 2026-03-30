@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: comms-watch TUI Dashboard
-status: verifying
-stopped_at: Completed 07-02-PLAN.md (GSD Watch Tab Renderer)
-last_updated: "2026-03-30T19:12:37.545Z"
+status: executing
+stopped_at: Completed 08-01-PLAN.md (Broker List Endpoints)
+last_updated: "2026-03-30T19:23:48.285Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 7
+  completed_plans: 5
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Multiple Claude Code instances can collaborate autonomously on GSD milestones without human intervention
-**Current focus:** Phase 07 — gsd-watch-tab
+**Current focus:** Phase 08 — broker-tabs-and-endpoint
 
 ## Current Position
 
-Phase: 8
-Plan: Not started
-Status: Phase complete — ready for verification
+Phase: 08 (broker-tabs-and-endpoint) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
 Last activity: 2026-03-30
 
 ```
@@ -63,6 +63,7 @@ Progress: [----------] 0% (0/4 phases)
 | Phase 07-gsd-watch-tab P01 | 4 | 1 tasks | 2 files |
 | Phase 07-gsd-watch-tab P02 | 3 | 1 tasks | 1 files |
 | Phase 07-gsd-watch-tab P02 | 15 | 2 tasks | 2 files |
+| Phase 08-broker-tabs-and-endpoint P01 | 3 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,8 @@ Recent decisions affecting current work:
 - [Phase 07-02]: lastRenderArgs pattern enables watcher-triggered re-renders without coupling to app.ts
 - [Phase 07-gsd-watch-tab]: lastRenderArgs pattern enables watcher-triggered re-renders without coupling gsd-watch.ts to app.ts
 - [Phase 07-gsd-watch-tab]: Bug fix: app.ts was not calling tab.start() — added await tab.start() in App.start() loop
+- [Phase 08-broker-tabs-and-endpoint]: /list-messages uses sent_at DESC ordering so TUI shows newest messages first
+- [Phase 08-broker-tabs-and-endpoint]: selectAllWaves uses correlated subqueries for task count aggregates to avoid extra round trips
 
 ### Pending Todos
 
@@ -106,6 +109,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-30T19:08:52.915Z
-Stopped at: Completed 07-02-PLAN.md (GSD Watch Tab Renderer)
+Last session: 2026-03-30T19:23:48.283Z
+Stopped at: Completed 08-01-PLAN.md (Broker List Endpoints)
 Resume file: None
