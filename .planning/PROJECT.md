@@ -34,7 +34,24 @@ Multiple Claude Code instances can collaborate autonomously on GSD milestones wi
 
 <!-- Current scope. Building toward these. -->
 
-(None — next milestone not yet planned)
+- [ ] comms-watch TUI app with 6 tabs (GSD Watch, Peers, Waves, Tasks, Messages, Stats)
+- [ ] Raw ANSI renderer (zero deps, alternate screen, resize-aware)
+- [ ] GSD Watch tab replicating gsd-watch tree view with fs.watch()
+- [ ] Broker visualization tabs (live polling of peers, waves, tasks, messages)
+- [ ] New broker endpoint: POST /list-messages (recent messages regardless of delivery)
+- [ ] Slash commands: /comms-watch, /comms-peers, /comms-send, /comms-stats, /comms-kill
+
+## Current Milestone: v1.1 comms-watch TUI Dashboard
+
+**Goal:** A unified terminal dashboard for monitoring GSD project status and claude-peers broker state, with slash commands for quick access.
+
+**Target features:**
+- comms-watch TUI app (6 tabs: GSD Watch, Peers, Waves, Tasks, Messages, Stats)
+- Raw ANSI renderer (zero dependencies, alternate screen, resize-aware)
+- GSD Watch tab (replicate gsd-watch tree view with fswatch)
+- Broker visualization tabs (live polling of peers, waves, tasks, messages)
+- New broker endpoint: POST /list-messages
+- Slash commands: /comms-watch, /comms-peers, /comms-send, /comms-stats, /comms-kill
 
 ### Out of Scope
 
@@ -42,11 +59,11 @@ Multiple Claude Code instances can collaborate autonomously on GSD milestones wi
 
 - Modifying core GSD workflows — this is a wrapper/plugin layer only
 - Cross-machine peer discovery — localhost only for now
-- Web UI dashboard — CLI and peer messaging are sufficient
+- Web UI dashboard — TUI dashboard covers observability needs
 - Persistent decision proxy memory — proxy is primed per-session, not stored
 - Git worktree isolation per executor — v2 enhancement (RSLN-01)
 - Progress-monotonicity stuck detection — v2 enhancement (RSLN-02)
-- Real-time dashboard — v2 enhancement (OBSV-01)
+- ~~Real-time dashboard — v2 enhancement (OBSV-01)~~ → Addressed by v1.1 comms-watch TUI
 
 ## Context
 
@@ -84,4 +101,4 @@ Multiple Claude Code instances can collaborate autonomously on GSD milestones wi
 - No VALIDATION.md for Phase 1
 
 ---
-*Last updated: 2026-03-25 after v1.0 milestone*
+*Last updated: 2026-03-30 after v1.1 milestone start*
