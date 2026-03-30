@@ -9,10 +9,10 @@ Requirements for the comms-watch TUI Dashboard milestone. Each maps to roadmap p
 
 ### TUI Core
 
-- [ ] **TUI-01**: TUI launches in alternate screen buffer with clean exit on quit (restores terminal state)
-- [ ] **TUI-02**: User can switch between 6 tabs via number keys (1-6) and Tab/Shift+Tab
-- [ ] **TUI-03**: TUI auto-refreshes data on configurable intervals (2s broker polling, 5s stats, event-driven for GSD Watch)
-- [ ] **TUI-04**: TUI handles terminal resize (SIGWINCH) without corruption
+- [x] **TUI-01**: TUI launches in alternate screen buffer with clean exit on quit (restores terminal state)
+- [x] **TUI-02**: User can switch between 6 tabs via number keys (1-6) and Tab/Shift+Tab
+- [x] **TUI-03**: TUI auto-refreshes data on configurable intervals (2s broker polling, 5s stats, event-driven for GSD Watch)
+- [x] **TUI-04**: TUI handles terminal resize (SIGWINCH) without corruption
 - [x] **TUI-05**: TUI renders box-drawing borders, ANSI 256 colors, and status badges
 
 ### GSD Watch Tab
@@ -73,10 +73,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TUI-01 | Phase 6 | Pending |
-| TUI-02 | Phase 6 | Pending |
-| TUI-03 | Phase 6 | Pending |
-| TUI-04 | Phase 6 | Pending |
+| TUI-01 | Phase 6 | Complete |
+| TUI-02 | Phase 6 | Complete |
+| TUI-03 | Phase 6 | Complete |
+| TUI-04 | Phase 6 | Complete |
 | TUI-05 | Phase 6 | Complete |
 | GSDW-01 | Phase 7 | Pending |
 | GSDW-02 | Phase 7 | Pending |
