@@ -19,6 +19,8 @@ import type {
   SendMessageRequest,
   PollMessagesRequest,
   PollMessagesResponse,
+  BroadcastRequest,
+  BroadcastResponse,
   Peer,
   Message,
 } from "./shared/types.ts";
@@ -40,10 +42,18 @@ db.run(`
     git_root TEXT,
     tty TEXT,
     summary TEXT NOT NULL DEFAULT '',
+    workspace TEXT DEFAULT NULL,
     registered_at TEXT NOT NULL,
     last_seen TEXT NOT NULL
   )
 `);
+
+// Migration for existing DBs
+try {
+  db.run("ALTER TABLE peers ADD COLUMN workspace TEXT DEFAULT NULL");
+} catch {
+  // Column already exists
+}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS messages (
@@ -81,8 +91,8 @@ setInterval(cleanStalePeers, 30_000);
 // --- Prepared statements ---
 
 const insertPeer = db.prepare(`
-  INSERT INTO peers (id, pid, cwd, git_root, tty, summary, registered_at, last_seen)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO peers (id, pid, cwd, git_root, tty, summary, workspace, registered_at, last_seen)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const updateLastSeen = db.prepare(`
@@ -107,6 +117,10 @@ const selectPeersByDirectory = db.prepare(`
 
 const selectPeersByGitRoot = db.prepare(`
   SELECT * FROM peers WHERE git_root = ?
+`);
+
+const selectPeersByWorkspace = db.prepare(`
+  SELECT * FROM peers WHERE workspace = ?
 `);
 
 const insertMessage = db.prepare(`
@@ -145,7 +159,7 @@ function handleRegister(body: RegisterRequest): RegisterResponse {
     deletePeer.run(existing.id);
   }
 
-  insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, now, now);
+  insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, body.workspace ?? null, now, now);
   return { id };
 }
 
@@ -173,6 +187,13 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
       } else {
         // No git root, fall back to directory
         peers = selectPeersByDirectory.all(body.cwd) as Peer[];
+      }
+      break;
+    case "workspace":
+      if (body.workspace) {
+        peers = selectPeersByWorkspace.all(body.workspace) as Peer[];
+      } else {
+        peers = [];
       }
       break;
     default:
@@ -219,6 +240,22 @@ function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   return { messages };
 }
 
+function handleBroadcast(body: BroadcastRequest): BroadcastResponse {
+  const targets = (selectPeersByWorkspace.all(body.workspace) as Peer[])
+    .filter((p) => p.id !== body.from_id);
+
+  if (targets.length === 0) {
+    return { ok: false, sent_to: 0, error: "No other peers in workspace" };
+  }
+
+  const now = new Date().toISOString();
+  for (const target of targets) {
+    insertMessage.run(body.from_id, target.id, body.text, now);
+  }
+
+  return { ok: true, sent_to: targets.length };
+}
+
 function handleUnregister(body: { id: string }): void {
   deletePeer.run(body.id);
 }
@@ -257,6 +294,8 @@ Bun.serve({
           return Response.json(handleSendMessage(body as SendMessageRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
+        case "/broadcast":
+          return Response.json(handleBroadcast(body as BroadcastRequest));
         case "/unregister":
           handleUnregister(body as { id: string });
           return Response.json({ ok: true });
