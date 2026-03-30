@@ -42,6 +42,29 @@ let scrollOffset: number = 0; // first visible row in viewport
 let planningDir: string | null = null;
 let noData: boolean = false; // true if .planning/ not found
 
+/**
+ * Find the git repository root by walking up from script location, then cwd.
+ * Returns cwd as final fallback.
+ */
+async function findGitRoot(): Promise<string> {
+  // Try from the script's directory first (tui/tabs/ -> project root)
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+  const fromScript = path.resolve(scriptDir, "../..");
+  if (await Bun.file(path.join(fromScript, ".planning", "ROADMAP.md")).exists()) {
+    return fromScript;
+  }
+
+  // Walk up from cwd looking for .planning/ROADMAP.md
+  let dir = process.cwd();
+  while (dir !== path.dirname(dir)) {
+    if (await Bun.file(path.join(dir, ".planning", "ROADMAP.md")).exists()) {
+      return dir;
+    }
+    dir = path.dirname(dir);
+  }
+  return process.cwd();
+}
+
 // Last render args for watcher-triggered re-renders
 let lastRenderArgs: {
   startRow: number;
@@ -307,9 +330,9 @@ function renderProgressBar(row: number, startCol: number, width: number): void {
  * Detects .planning/ directory, parses initial tree, starts fs.watch.
  */
 export async function start(): Promise<void> {
-  // Look for .planning/ROADMAP.md relative to cwd
-  const cwd = process.cwd();
-  const candidate = path.join(cwd, ".planning");
+  // Find .planning/ relative to git root, then fall back to cwd
+  const gitRoot = await findGitRoot();
+  const candidate = path.join(gitRoot, ".planning");
   const roadmapPath = path.join(candidate, "ROADMAP.md");
 
   try {

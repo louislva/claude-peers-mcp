@@ -34,7 +34,7 @@ export interface TabDef {
   TAB_NAME: string;
   REFRESH_MS: number;
   render(startRow: number, startCol: number, width: number, height: number): void;
-  start(): void;
+  start(): void | Promise<void>;
   stop(): void;
   handleKey(name: string): void;
 }
@@ -62,6 +62,11 @@ export class App {
 
     // Handle terminal resize
     process.on("SIGWINCH", () => this.render());
+
+    // Start each tab's background work (fs.watch, initial data load, etc.)
+    for (const tab of TABS) {
+      tab.start();
+    }
 
     // Start per-tab refresh timers for tabs with REFRESH_MS > 0
     for (let i = 0; i < TABS.length; i++) {
