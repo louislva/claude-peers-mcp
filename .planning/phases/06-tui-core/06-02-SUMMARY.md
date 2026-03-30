@@ -81,11 +81,11 @@ Entry point for `bun tui/main.ts`:
 |------|-------------|--------|
 | 1 | Create 6 placeholder tab renderers | 2b36d19 |
 | 2 | Create app shell (tui/app.ts + tui/main.ts) | 287b4ef |
-| 3 | Human verification checkpoint | (pending) |
+| 3 | Human verification checkpoint | approved |
 
-## Checkpoint: Task 3 — Human Verification Required
+## Checkpoint: Task 3 — Human Verification APPROVED
 
-The TUI shell is complete. Automated verification passed (`bun tui/main.ts --help` prints usage and exits cleanly). Human verification is needed to confirm:
+The TUI shell is complete. User approved the checkpoint on 2026-03-30, confirming:
 
 1. `bun tui/main.ts` enters alternate screen with dark background
 2. Tab bar shows: `1 GSD Watch  2 Peers  3 Waves  4 Tasks  5 Messages  6 Stats`
