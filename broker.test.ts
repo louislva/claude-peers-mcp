@@ -251,3 +251,21 @@ test("broadcast to empty workspace returns error", async () => {
   expect(result.sent_to).toBe(0);
   expect(result.error).toBeDefined();
 });
+
+test("send_message across workspaces succeeds", async () => {
+  const pids = findAlivePids(2);
+
+  const peer1 = await post<{ id: string }>("/register", {
+    pid: pids[0], cwd: "/tmp/p1", git_root: null, tty: null,
+    summary: "peer1", workspace: "ws-a",
+  });
+  const peer2 = await post<{ id: string }>("/register", {
+    pid: pids[1], cwd: "/tmp/p2", git_root: null, tty: null,
+    summary: "peer2", workspace: "ws-b",
+  });
+
+  const result = await post<{ ok: boolean }>("/send-message", {
+    from_id: peer1.id, to_id: peer2.id, text: "hello from another workspace",
+  });
+  expect(result.ok).toBe(true);
+});
