@@ -8,7 +8,7 @@
   "scripts": {
     "broker": "bun broker.ts",
     "server": "bun server.ts",
-    "test": "bun test"
+    "test": "bun test broker.test.ts && bun test gsd-plugin/executor/executor-helpers.test.ts && bun test gsd-plugin/proxy/proxy-helpers.test.ts && bun test gsd-plugin/orchestrator/orchestrator-helpers.test.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

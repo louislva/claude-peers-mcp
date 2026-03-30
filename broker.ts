@@ -19,8 +19,15 @@ import type {
   SendMessageRequest,
   PollMessagesRequest,
   PollMessagesResponse,
+  ListMessagesRequest,
+  ListWavesResponse,
   Peer,
   Message,
+  Wave,
+  PeerAvailabilityRequest,
+  PeerAvailabilityResponse,
+  AvailablePeer,
+  BusyPeer,
 } from "./shared/types.ts";
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
@@ -174,6 +181,18 @@ const markDelivered = db.prepare(`
   UPDATE messages SET delivered = 1, delivered_at = ? WHERE id = ?
 `);
 
+const selectRecentMessages = db.prepare(
+  `SELECT * FROM messages ORDER BY sent_at DESC LIMIT ?`
+);
+
+const selectAllWaves = db.prepare(
+  `SELECT w.*,
+    (SELECT COUNT(*) FROM task_assignments WHERE wave_id = w.id) as task_count,
+    (SELECT COUNT(*) FROM task_assignments WHERE wave_id = w.id AND status = 'completed') as tasks_completed,
+    (SELECT COUNT(*) FROM task_assignments WHERE wave_id = w.id AND status = 'running') as tasks_running
+  FROM waves w ORDER BY w.created_at DESC`
+);
+
 // --- Session prepared statements ---
 
 const upsertSession = db.prepare(`
@@ -220,6 +239,17 @@ const updateTaskStatus = db.prepare(`
 
 const assignTaskSession = db.prepare(`
   UPDATE task_assignments SET session_id = ? WHERE id = ?
+`);
+
+// Peer availability: LEFT JOIN to get running task info in one query
+const selectPeersWithTaskState = db.prepare(`
+  SELECT
+    p.id, p.pid, p.cwd, p.git_root, p.summary, p.last_seen,
+    ta.task_name AS current_task,
+    ta.started_at AS task_started_at
+  FROM peers p
+  LEFT JOIN sessions s ON s.peer_id = p.id AND s.status = 'active'
+  LEFT JOIN task_assignments ta ON ta.session_id = s.session_id AND ta.status = 'running'
 `);
 
 // --- Shared cleanup helper (used inside transactions) ---
@@ -691,7 +721,110 @@ function handleTaskBlocked(body: { task_id: number; reason: string }): { ok: boo
   return taskBlockedTxn(body.task_id, body.reason);
 }
 
+function handlePeerAvailability(body: PeerAvailabilityRequest): PeerAvailabilityResponse {
+  const rows = selectPeersWithTaskState.all() as Array<{
+    id: string;
+    pid: number;
+    cwd: string;
+    git_root: string | null;
+    summary: string;
+    last_seen: string;
+    current_task: string | null;
+    task_started_at: string | null;
+  }>;
+
+  const repoAvailable: AvailablePeer[] = [];
+  const repoBusy: BusyPeer[] = [];
+  const machineAvailable: AvailablePeer[] = [];
+  const machineBusy: BusyPeer[] = [];
+
+  for (const row of rows) {
+    // Skip the requesting peer
+    if (body.exclude_id && row.id === body.exclude_id) continue;
+
+    // Verify PID is still alive
+    try { process.kill(row.pid, 0); } catch { continue; }
+
+    const isRepoPeer = row.git_root === body.repo;
+
+    if (row.current_task && row.task_started_at) {
+      const busy: BusyPeer = {
+        id: row.id,
+        pid: row.pid,
+        cwd: row.cwd,
+        git_root: row.git_root,
+        summary: row.summary,
+        current_task: row.current_task,
+        task_started_at: row.task_started_at,
+      };
+      if (isRepoPeer) repoBusy.push(busy);
+      else machineBusy.push(busy);
+    } else {
+      const available: AvailablePeer = {
+        id: row.id,
+        pid: row.pid,
+        cwd: row.cwd,
+        git_root: row.git_root,
+        summary: row.summary,
+        idle_since: row.last_seen,
+      };
+      if (isRepoPeer) repoAvailable.push(available);
+      else machineAvailable.push(available);
+    }
+  }
+
+  return {
+    repo_peers: { available: repoAvailable, busy: repoBusy },
+    machine_peers: { available: machineAvailable, busy: machineBusy },
+  };
+}
+
+// Files that are implicitly modified when any file in their directory changes
+const LOCK_FILE_NAMES = ["package-lock.json", "bun.lockb", "yarn.lock", "pnpm-lock.yaml"];
+
+// Auto-generated index/barrel files that aggregate exports from a directory
+const AUTO_GENERATED_PATTERNS = ["index.ts", "index.js", "index.tsx", "index.jsx"];
+
+/**
+ * Expand a file list to include lock files and auto-generated indexes
+ * that would be implicitly affected by modifications.
+ *
+ * For each declared file:
+ * - If it's a package.json → add all lock file variants in same dir
+ * - If it's a source file in a directory → add index.ts/index.js in same dir
+ *
+ * Returns deduplicated expanded list.
+ */
+function expandFilesForConflictCheck(files: string[]): string[] {
+  const expanded = new Set(files);
+
+  for (const file of files) {
+    const lastSlash = file.lastIndexOf("/");
+    // dir is "" for root-level files, "src/auth/" for nested files
+    const dir = lastSlash >= 0 ? file.substring(0, lastSlash + 1) : "";
+    const basename = lastSlash >= 0 ? file.substring(lastSlash + 1) : file;
+
+    // If modifying package.json, also claim lock files
+    if (basename === "package.json") {
+      for (const lock of LOCK_FILE_NAMES) {
+        expanded.add(dir + lock);
+      }
+    }
+
+    // If modifying a source file, also claim index/barrel file in same directory
+    if (/\.(ts|tsx|js|jsx)$/.test(basename) && !AUTO_GENERATED_PATTERNS.includes(basename)) {
+      for (const idx of AUTO_GENERATED_PATTERNS) {
+        expanded.add(dir + idx);
+      }
+    }
+  }
+
+  return Array.from(expanded);
+}
+
 function handleConflictCheck(body: { wave_id: number; files: string[] }): { conflicts: { task_id: number; task_name: string; conflicting_files: string[] }[] } {
+  const expandedInput = expandFilesForConflictCheck(body.files);
+
   const runningTasks = db.query(
     "SELECT id, files, task_name FROM task_assignments WHERE wave_id = ? AND status = 'running'"
   ).all(body.wave_id) as { id: number; files: string; task_name: string }[];
@@ -699,7 +832,8 @@ function handleConflictCheck(body: { wave_id: number; files: string[] }): { conf
   const conflicts: { task_id: number; task_name: string; conflicting_files: string[] }[] = [];
   for (const task of runningTasks) {
     const taskFiles: string[] = JSON.parse(task.files);
-    const overlap = body.files.filter(f => taskFiles.includes(f));
+    const expandedTaskFiles = expandFilesForConflictCheck(taskFiles);
+    const overlap = expandedInput.filter(f => expandedTaskFiles.includes(f));
     if (overlap.length > 0) {
       conflicts.push({ task_id: task.id, task_name: task.task_name, conflicting_files: overlap });
     }
@@ -718,6 +852,20 @@ function handleAckMessage(body: { message_ids: number[] }): { ok: boolean } {
   });
   ackTxn();
   return { ok: true };
+}
+
+// --- List messages handler (read-only, all messages regardless of delivery status) ---
+
+function handleListMessages(body: ListMessagesRequest): Message[] {
+  const limit = Math.min(Math.max((body.limit ?? 50), 1), 200);
+  return selectRecentMessages.all(limit) as Message[];
+}
+
+// --- List waves handler (all waves with task count aggregates) ---
+
+function handleListWaves(): ListWavesResponse {
+  const waves = selectAllWaves.all() as Array<Wave & { task_count: number; tasks_completed: number; tasks_running: number }>;
+  return { waves };
 }
 
 // --- HTTP Server ---
@@ -783,6 +931,16 @@ Bun.serve({
           return Response.json(handleTaskBlocked(body as { task_id: number; reason: string }));
         case "/conflict-check":
           return Response.json(handleConflictCheck(body as { wave_id: number; files: string[] }));
+        case "/peer-availability":
+          return Response.json(handlePeerAvailability(body as PeerAvailabilityRequest));
+
+        // --- List messages (read-only, all regardless of delivery status) ---
+        case "/list-messages":
+          return Response.json(handleListMessages(body as ListMessagesRequest));
+
+        // --- List waves (all waves with task count aggregates) ---
+        case "/list-waves":
+          return Response.json(handleListWaves());
 
         // --- Message ACK ---
         case "/ack-message":

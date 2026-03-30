@@ -1,25 +1,44 @@
+---
+gsd_state_version: 1.0
+milestone: v1.1
+milestone_name: comms-watch TUI Dashboard
+status: milestone_complete
+stopped_at: "v1.1 milestone shipped 2026-03-30"
+last_updated: "2026-03-30T20:16:01.208Z"
+last_activity: 2026-03-30
+progress:
+  total_phases: 4
+  completed_phases: 4
+  total_plans: 9
+  completed_plans: 9
+  percent: 0
+---
+
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-25)
+See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Multiple Claude Code instances can collaborate autonomously on GSD milestones without human intervention
-**Current focus:** Milestone v1.0 — Phase 1: Foundation
+**Current focus:** Phase 09 — slash-commands
 
 ## Current Position
 
-Phase: 1 of 5 (Foundation)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-03-25 — Roadmap created, ready to begin Phase 1
+Phase: 09
+Plan: Not started
+Status: Phase complete — ready for verification
+Last activity: 2026-03-30
 
-Progress: [░░░░░░░░░░] 0%
+```
+Progress: [----------] 0% (0/4 phases)
+```
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
+
+- Total plans completed: 0 (v1.1)
 - Average duration: --
 - Total execution time: 0 hours
 
@@ -27,13 +46,28 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 6. TUI Core | TBD | - | - |
+| 7. GSD Watch Tab | TBD | - | - |
+| 8. Broker Tabs and Endpoint | TBD | - | - |
+| 9. Slash Commands | TBD | - | - |
 
 **Recent Trend:**
+
 - Last 5 plans: --
 - Trend: --
 
 *Updated after each plan completion*
+| Phase 06 P01 | 2 | 3 tasks | 3 files |
+| Phase 06-tui-core P02 | 4 | 2 tasks | 8 files |
+| Phase 06-tui-core P02 | 30 | 3 tasks | 8 files |
+| Phase 07-gsd-watch-tab P01 | 4 | 1 tasks | 2 files |
+| Phase 07-gsd-watch-tab P02 | 3 | 1 tasks | 1 files |
+| Phase 07-gsd-watch-tab P02 | 15 | 2 tasks | 2 files |
+| Phase 08-broker-tabs-and-endpoint P01 | 3 | 2 tasks | 3 files |
+| Phase 08-broker-tabs-and-endpoint P02 | 15 | 2 tasks | 2 files |
+| Phase 08-broker-tabs-and-endpoint P03 | 3 | 2 tasks | 3 files |
+| Phase 09-slash-commands P01 | 22 | 2 tasks | 2 files |
+| Phase 09-slash-commands P02 | 75 | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -47,6 +81,36 @@ Recent decisions affecting current work:
 - Architecture: Decision proxy as dedicated peer role — separates "understanding the user" from "planning/coordinating"
 - Architecture: Single branch per wave — simpler than per-executor branches; conflict-check prevents file overlap
 - Architecture: Filesystem-first context handoff — executors read plan files from git, not message payloads
+- [v1.1 TUI]: Zero new dependencies — raw ANSI escape codes only, no blessed/ink/terminal-kit
+- [v1.1 TUI]: ANSI 256-color (not true color) for wider terminal compatibility
+- [v1.1 TUI]: No compiled binary for v1.1 — run via `bun tui/main.ts`; compilation deferred to v2
+- [v1.1 TUI]: Messages tab uses new /list-messages endpoint (not /poll-messages) — read-only view, no ACK
+- [v1.1 TUI]: Slash commands placed in project .claude/commands/ directory
+- [v1.1 TUI]: /comms-watch uses same tmux split pattern as /gsd-watch — 35% width, right side, duplicate detection
+- [Phase 06]: ANSI 256-color only (not true color) per project decision for wider terminal compatibility
+- [Phase 06]: brokerFetch duplicated from cli.ts in tui/broker.ts per project convention (no cross-module imports)
+- [Phase 06-tui-core]: REFRESH_MS=0 for GSD Watch tab — event-driven via fs.watch in Phase 7, not polling
+- [Phase 06-tui-core]: onQuit callback pattern decouples App from exitAltScreen — main.ts owns terminal lifecycle
+- [Phase 06-tui-core]: REFRESH_MS=0 for GSD Watch tab — event-driven via fs.watch in Phase 7, not polling
+- [Phase 06-tui-core]: onQuit callback pattern decouples App from exitAltScreen — main.ts owns terminal lifecycle
+- [Phase 06-tui-core]: refreshTab() only renders if the refreshing tab is currently active — avoids invisible CPU waste
+- [Phase 07-gsd-watch-tab]: Two-pass ROADMAP.md parsing: Phase Details collected first, then milestone/phase list to avoid backtracking
+- [Phase 07-gsd-watch-tab]: Parser-renderer separation: gsd-watch-parser.ts returns typed GsdTree; renderer (Plan 02) receives it as data
+- [Phase 07-02]: start() is async (Promise<void>) — compatible with TabDef void interface in TypeScript
+- [Phase 07-02]: lastRenderArgs pattern enables watcher-triggered re-renders without coupling to app.ts
+- [Phase 07-gsd-watch-tab]: lastRenderArgs pattern enables watcher-triggered re-renders without coupling gsd-watch.ts to app.ts
+- [Phase 07-gsd-watch-tab]: Bug fix: app.ts was not calling tab.start() — added await tab.start() in App.start() loop
+- [Phase 08-broker-tabs-and-endpoint]: /list-messages uses sent_at DESC ordering so TUI shows newest messages first
+- [Phase 08-broker-tabs-and-endpoint]: selectAllWaves uses correlated subqueries for task count aggregates to avoid extra round trips
+- [Phase 08-broker-tabs-and-endpoint]: Peers tab uses fire-and-forget fetchData() via lastRenderArgs pattern — consistent with established gsd-watch.ts pattern
+- [Phase 08-broker-tabs-and-endpoint]: Stats tab fetches /stats and /health in parallel via Promise.all — single async round-trip for both endpoints
+- [Phase 08-broker-tabs-and-endpoint]: Role badge detection uses case-insensitive substring matching on peer.summary (orchestrat/execut/proxy keywords)
+- [Phase 08-broker-tabs-and-endpoint]: Waves tab fetches /list-waves then /wave-status per wave — single sequential pass for simplicity
+- [Phase 08-broker-tabs-and-endpoint]: Messages tab uses /list-messages (read-only) not /poll-messages (ACK-based)
+- [Phase 09-slash-commands]: /comms-watch follows exact /gsd-watch pattern with printf pane title trick for duplicate detection
+- [Phase 09-slash-commands]: /comms-kill checks /health first for peer count before lsof + SIGTERM kill
+- [Phase 09-slash-commands]: /comms-peers, /comms-send, /comms-stats omit disable-model-invocation so Claude parses JSON and formats output readably
+- [Phase 09-slash-commands]: comms-send uses jq for safe JSON escaping of user-provided message text
 
 ### Pending Todos
 
@@ -54,11 +118,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 4 (Orchestrator Workflow): ROADMAP.md dependency format may not include explicit dependency declarations in GSD-generated roadmaps. Confirm actual format before writing the parser; may need to fall back to LLM inference with mandatory cycle detection. Research flag noted in SUMMARY.md.
-- Phase 2/4 (Git strategy): Single-branch-per-wave with push jitter vs git worktrees — design doc specifies single-branch; research recommends worktrees for robustness. Needs deliberate decision during Phase 2 design.
+- Phase 8 (Broker Tabs): Waves tab needs a wave ID to call /wave-status. TUI will need to discover active wave IDs — likely via a stats-style call or by storing IDs seen in the message feed. Confirm approach during Phase 8 planning.
 
 ## Session Continuity
 
-Last session: 2026-03-25
-Stopped at: Roadmap created — all 34 v1.0 requirements mapped to 5 phases
+Last session: 2026-03-30T20:13:08.755Z
+Stopped at: Completed 09-02-PLAN.md (Slash Commands: /comms-peers, /comms-send, /comms-stats)
 Resume file: None

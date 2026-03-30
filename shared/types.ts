@@ -12,7 +12,10 @@ export interface Peer {
   last_seen: string; // ISO timestamp
 }
 
-export type MessageType = "chat" | "task_complete" | "task_blocked" | "wave_advance" | "status_request" | "status_response";
+export type MessageType =
+  | "chat" | "task_complete" | "task_blocked" | "wave_advance" | "status_request" | "status_response"
+  | "execute_phase" | "phase_complete" | "phase_blocked" | "phase_progress"
+  | "reclaim_task" | "discuss_choice" | "discuss_answer";
 
 export interface Message {
   id: number;
@@ -49,6 +52,10 @@ export interface Wave {
   completed_at: string | null;
 }
 
+// BRKR-02: TaskStatus already includes "failed" (see above).
+// broker.ts taskCompleteTxn (line ~665) counts failed tasks as terminal:
+//   "WHERE wave_id = ? AND status NOT IN ('completed', 'failed')"
+// This means a failed task does NOT block wave completion.
 export type TaskStatus = "pending" | "running" | "completed" | "failed" | "blocked";
 
 export interface TaskAssignment {
@@ -109,4 +116,145 @@ export interface PollMessagesRequest {
 
 export interface PollMessagesResponse {
   messages: Message[];
+}
+
+export interface ListMessagesRequest {
+  limit?: number; // default 50, max 200
+}
+
+export interface ListWavesResponse {
+  waves: Array<Wave & { task_count: number; tasks_completed: number; tasks_running: number }>;
+}
+
+// --- Autonomous peer coordination types ---
+
+export type BlockedReason = "git_conflict" | "file_conflict" | "plan_not_found" | "test_failure" | "dependency_missing" | "permission_denied" | "unknown";
+
+export interface ExecutePhasePayload {
+  phase_number: number;
+  plan_path: string;
+  flags: string;
+  wave_id: number;
+  task_id: number;
+  orchestrator_id: PeerId;
+  context_summary?: string;
+}
+
+export interface PhaseCompletePayload {
+  task_id: number;
+  wave_id: number;
+  phase_number: number;
+  verification: {
+    passed: boolean;
+    criteria_met: number;
+    criteria_total: number;
+    gaps: string[];
+  };
+  commits: string[];
+  files_modified: string[];
+}
+
+export interface PhaseBlockedPayload {
+  task_id: number;
+  wave_id: number;
+  phase_number: number;
+  reason: BlockedReason;
+  detail: string;
+  tasks_completed: number;
+  tasks_total: number;
+  recoverable: boolean;
+}
+
+export interface PhaseProgressPayload {
+  task_id: number;
+  wave_id: number;
+  phase_number: number;
+  tasks_completed: number;
+  tasks_total: number;
+  last_commit: string;
+  current_task: string;
+}
+
+export interface StatusRequestPayload {
+  task_id: number;
+}
+
+export interface StatusResponsePayload {
+  task_id: number;
+  status: "acknowledged" | "executing" | "completing" | "idle" | "reclaimed";
+  tasks_completed: number;
+  tasks_total: number;
+  current_task: string;
+  last_activity: string;
+}
+
+export interface ReclaimTaskPayload {
+  task_id: number;
+  wave_id: number;
+  reason: string;
+}
+
+export interface DiscussChoicePayload {
+  phase_number: number;
+  phase_goal: string;
+  question: string;
+  options: string[];
+  recommended: string;
+  context: string;
+  prior_decisions?: Array<{ phase: number; question: string; chosen: string }>;
+}
+
+export interface DiscussAnswerPayload {
+  phase_number: number;
+  chosen: string;
+  reasoning: string;
+}
+
+export interface AutonomousPayloadMap {
+  execute_phase: ExecutePhasePayload;
+  phase_complete: PhaseCompletePayload;
+  phase_blocked: PhaseBlockedPayload;
+  phase_progress: PhaseProgressPayload;
+  status_request: StatusRequestPayload;
+  status_response: StatusResponsePayload;
+  reclaim_task: ReclaimTaskPayload;
+  discuss_choice: DiscussChoicePayload;
+  discuss_answer: DiscussAnswerPayload;
+}
+
+export type AutonomousMessageType = keyof AutonomousPayloadMap;
+
+export interface AvailablePeer {
+  id: PeerId;
+  pid: number;
+  cwd: string;
+  git_root: string | null;
+  summary: string;
+  idle_since: string; // ISO timestamp — last_seen or task completion time
+}
+
+export interface BusyPeer {
+  id: PeerId;
+  pid: number;
+  cwd: string;
+  git_root: string | null;
+  summary: string;
+  current_task: string; // task_name from task_assignments
+  task_started_at: string; // ISO timestamp
+}
+
+export interface PeerAvailabilityRequest {
+  repo: string; // git_root for same-repo filtering
+  exclude_id?: PeerId; // exclude the requesting peer
+}
+
+export interface PeerAvailabilityResponse {
+  repo_peers: {
+    available: AvailablePeer[];
+    busy: BusyPeer[];
+  };
+  machine_peers: {
+    available: AvailablePeer[];
+    busy: BusyPeer[];
+  };
 }

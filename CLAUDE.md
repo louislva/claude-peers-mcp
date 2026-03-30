@@ -87,9 +87,11 @@ bun cli.ts kill-broker     # Stop the broker daemon
 | POST | `/task-blocked` | Mark task blocked with reason |
 | POST | `/conflict-check` | Check file list against running tasks |
 
-### Monitoring + Maintenance
+### TUI + Monitoring
 | Method | Endpoint | Description |
 |---|---|---|
+| POST | `/list-messages` | Recent N messages regardless of delivery (default 50, max 200) |
+| POST | `/list-waves` | All waves with task count aggregates |
 | GET | `/health` | Broker status + peer count |
 | GET | `/stats` | DB size, row counts, retention config, schema version |
 | POST | `/prune` | Trigger retention cleanup, returns pruned counts |
