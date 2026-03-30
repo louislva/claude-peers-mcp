@@ -84,7 +84,10 @@ Plans:
   3. Running /comms-send <peer-id> <message> delivers the message and reports success or failure inline
   4. Running /comms-stats prints row counts and retention policy inline in the conversation
   5. Running /comms-kill stops the broker daemon and confirms shutdown inline
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 09-01-PLAN.md — /comms-watch (tmux TUI launcher) and /comms-kill (broker shutdown)
+- [ ] 09-02-PLAN.md — /comms-peers, /comms-send, /comms-stats (inline broker query commands)
 
 ## Progress
 
@@ -98,4 +101,4 @@ Plans:
 | 6. TUI Core | v1.1 | 2/2 | Complete   | 2026-03-30 |
 | 7. GSD Watch Tab | v1.1 | 2/2 | Complete   | 2026-03-30 |
 | 8. Broker Tabs and Endpoint | v1.1 | 3/3 | Complete   | 2026-03-30 |
-| 9. Slash Commands | v1.1 | 0/? | Not started | - |
+| 9. Slash Commands | v1.1 | 0/2 | Not started | - |
