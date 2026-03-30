@@ -1,5 +1,6 @@
 import { test, expect, beforeAll, afterAll } from "bun:test";
-import { Subprocess } from "bun";
+import type { Subprocess } from "bun";
+import type { Peer, BroadcastResponse, PollMessagesResponse } from "./shared/types.ts";
 
 const TEST_PORT = 17899;
 const TEST_DB = `/tmp/claude-peers-test-${Date.now()}.db`;
@@ -36,13 +37,13 @@ function findAlivePids(count: number): number[] {
   return result;
 }
 
-async function post(path: string, body: unknown) {
+async function post<T = unknown>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 beforeAll(async () => {
@@ -83,7 +84,7 @@ afterAll(async () => {
 });
 
 test("register peer without workspace", async () => {
-  const result = await post("/register", {
+  const result = await post<{ id: string }>("/register", {
     pid: process.pid,
     cwd: "/tmp/test",
     git_root: null,
@@ -97,7 +98,7 @@ test("register peer without workspace", async () => {
 });
 
 test("register peer with workspace", async () => {
-  const result = await post("/register", {
+  const result = await post<{ id: string }>("/register", {
     pid: process.pid,
     cwd: "/tmp/test",
     git_root: null,
@@ -114,7 +115,7 @@ test("list-peers with workspace scope", async () => {
   const pids = findAlivePids(3);
 
   // Register peer A in workspace "ws-alpha"
-  const peerA = await post("/register", {
+  const peerA = await post<{ id: string }>("/register", {
     pid: pids[0],
     cwd: "/tmp/a",
     git_root: null,
@@ -124,7 +125,7 @@ test("list-peers with workspace scope", async () => {
   });
 
   // Register peer B in workspace "ws-alpha"
-  const peerB = await post("/register", {
+  const peerB = await post<{ id: string }>("/register", {
     pid: pids[1],
     cwd: "/tmp/b",
     git_root: null,
@@ -134,7 +135,7 @@ test("list-peers with workspace scope", async () => {
   });
 
   // Register peer C in workspace "ws-beta"
-  const peerC = await post("/register", {
+  const peerC = await post<{ id: string }>("/register", {
     pid: pids[2],
     cwd: "/tmp/c",
     git_root: null,
@@ -144,7 +145,7 @@ test("list-peers with workspace scope", async () => {
   });
 
   // List peers with workspace scope "ws-alpha"
-  const peers = await post("/list-peers", {
+  const peers = await post<Peer[]>("/list-peers", {
     scope: "workspace",
     cwd: "/tmp",
     git_root: null,
@@ -152,7 +153,7 @@ test("list-peers with workspace scope", async () => {
   });
 
   expect(Array.isArray(peers)).toBe(true);
-  const ids = peers.map((p: any) => p.id);
+  const ids = peers.map((p) => p.id);
   expect(ids).toContain(peerA.id);
   expect(ids).toContain(peerB.id);
   expect(ids).not.toContain(peerC.id);
@@ -162,7 +163,7 @@ test("broadcast sends to all workspace members", async () => {
   const pids = findAlivePids(3);
 
   // Register sender in workspace "ws-broadcast"
-  const sender = await post("/register", {
+  const sender = await post<{ id: string }>("/register", {
     pid: pids[0],
     cwd: "/tmp/sender",
     git_root: null,
@@ -172,7 +173,7 @@ test("broadcast sends to all workspace members", async () => {
   });
 
   // Register receiver1 in same workspace
-  const receiver1 = await post("/register", {
+  const receiver1 = await post<{ id: string }>("/register", {
     pid: pids[1],
     cwd: "/tmp/receiver1",
     git_root: null,
@@ -182,7 +183,7 @@ test("broadcast sends to all workspace members", async () => {
   });
 
   // Register receiver2 in same workspace
-  const receiver2 = await post("/register", {
+  const receiver2 = await post<{ id: string }>("/register", {
     pid: pids[2],
     cwd: "/tmp/receiver2",
     git_root: null,
@@ -192,7 +193,7 @@ test("broadcast sends to all workspace members", async () => {
   });
 
   // Broadcast from sender
-  const broadcastResult = await post("/broadcast", {
+  const broadcastResult = await post<BroadcastResponse>("/broadcast", {
     from_id: sender.id,
     workspace: "ws-broadcast",
     text: "hello everyone",
@@ -202,23 +203,23 @@ test("broadcast sends to all workspace members", async () => {
   expect(broadcastResult.sent_to).toBe(2);
 
   // Check receiver1 got the message
-  const msgs1 = await post("/poll-messages", { id: receiver1.id });
+  const msgs1 = await post<PollMessagesResponse>("/poll-messages", { id: receiver1.id });
   expect(msgs1.messages.length).toBe(1);
-  expect(msgs1.messages[0].text).toBe("hello everyone");
-  expect(msgs1.messages[0].from_id).toBe(sender.id);
+  expect(msgs1.messages[0]!.text).toBe("hello everyone");
+  expect(msgs1.messages[0]!.from_id).toBe(sender.id);
 
   // Check receiver2 got the message
-  const msgs2 = await post("/poll-messages", { id: receiver2.id });
+  const msgs2 = await post<PollMessagesResponse>("/poll-messages", { id: receiver2.id });
   expect(msgs2.messages.length).toBe(1);
-  expect(msgs2.messages[0].text).toBe("hello everyone");
-  expect(msgs2.messages[0].from_id).toBe(sender.id);
+  expect(msgs2.messages[0]!.text).toBe("hello everyone");
+  expect(msgs2.messages[0]!.from_id).toBe(sender.id);
 });
 
 test("broadcast to empty workspace returns error", async () => {
   const pids = findAlivePids(1);
 
   // Register one peer alone in a workspace
-  const loner = await post("/register", {
+  const loner = await post<{ id: string }>("/register", {
     pid: pids[0],
     cwd: "/tmp/loner",
     git_root: null,
@@ -228,7 +229,7 @@ test("broadcast to empty workspace returns error", async () => {
   });
 
   // Broadcast - should fail since no OTHER peers in workspace
-  const result = await post("/broadcast", {
+  const result = await post<BroadcastResponse>("/broadcast", {
     from_id: loner.id,
     workspace: "ws-lonely",
     text: "is anyone there?",
