@@ -139,6 +139,10 @@ let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
 
+// Local buffer for messages consumed by the poll loop but possibly not seen
+// by Claude via channel push. check_messages drains this buffer.
+const localMessageBuffer: Message[] = [];
+
 // --- MCP Server ---
 
 const mcp = new Server(
@@ -364,20 +368,27 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         };
       }
       try {
+        // Drain local buffer (messages already consumed from broker by poll loop)
+        const buffered = localMessageBuffer.splice(0, localMessageBuffer.length);
+
+        // Also check broker for any messages the poll loop hasn't grabbed yet
         const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
-        if (result.messages.length === 0) {
+
+        const allMessages = [...buffered, ...result.messages];
+
+        if (allMessages.length === 0) {
           return {
             content: [{ type: "text" as const, text: "No new messages." }],
           };
         }
-        const lines = result.messages.map(
+        const lines = allMessages.map(
           (m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`
         );
         return {
           content: [
             {
               type: "text" as const,
-              text: `${result.messages.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`,
+              text: `${allMessages.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`,
             },
           ],
         };
@@ -408,6 +419,10 @@ async function pollAndPushMessages() {
     const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
 
     for (const msg of result.messages) {
+      // Buffer locally so check_messages can still return them
+      // even if the channel push doesn't reach Claude
+      localMessageBuffer.push(msg);
+
       // Look up the sender's info for context
       let fromSummary = "";
       let fromCwd = "";
@@ -427,20 +442,23 @@ async function pollAndPushMessages() {
       }
 
       // Push as channel notification — this is what makes it immediate
-      await mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content: msg.text,
-          meta: {
-            from_id: msg.from_id,
-            from_summary: fromSummary,
-            from_cwd: fromCwd,
-            sent_at: msg.sent_at,
+      try {
+        await mcp.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: msg.text,
+            meta: {
+              from_id: msg.from_id,
+              from_summary: fromSummary,
+              from_cwd: fromCwd,
+              sent_at: msg.sent_at,
+            },
           },
-        },
-      });
-
-      log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+        });
+        log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+      } catch (e) {
+        log(`Channel push failed for ${msg.from_id} (buffered for check_messages): ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
   } catch (e) {
     // Broker might be down temporarily, don't crash
