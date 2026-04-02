@@ -24,8 +24,9 @@ import type {
 } from "./shared/types.ts";
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
-const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
-const TOKEN_PATH = process.env.CLAUDE_PEERS_TOKEN_PATH ?? `${process.env.HOME}/.claude-peers-token`;
+const HOME_DIR = process.env.HOME ?? process.env.USERPROFILE ?? require("os").homedir();
+const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${HOME_DIR}/.claude-peers.db`;
+const TOKEN_PATH = process.env.CLAUDE_PEERS_TOKEN_PATH ?? `${HOME_DIR}/.claude-peers-token`;
 
 // --- Security: shared secret token ---
 

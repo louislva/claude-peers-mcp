@@ -39,7 +39,8 @@ const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
-const TOKEN_PATH = process.env.CLAUDE_PEERS_TOKEN_PATH ?? `${process.env.HOME}/.claude-peers-token`;
+const HOME_DIR = process.env.HOME ?? process.env.USERPROFILE ?? require("os").homedir();
+const TOKEN_PATH = process.env.CLAUDE_PEERS_TOKEN_PATH ?? `${HOME_DIR}/.claude-peers-token`;
 
 // --- Security: read broker token ---
 
