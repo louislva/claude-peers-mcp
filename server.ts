@@ -140,13 +140,18 @@ let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
 
-// Local buffer for messages consumed by the poll loop but possibly not seen
-// by Claude via channel push. check_messages drains this buffer.
+// Local buffer for messages fetched by the poll loop, awaiting delivery
+// via piggyback (drainPendingMessages) or check_messages.
 const localMessageBuffer: Message[] = [];
+const localBufferIds = new Set<number>(); // O(1) dedup for poll loop
 
-// Dedup set: tracks message IDs already delivered to Claude (via channel push,
-// check_messages, or piggyback). Prevents duplicate delivery across paths.
-const pushedMessageIds = new Set<number>();
+// Messages confirmed delivered to Claude via tool response (piggyback or check_messages).
+// Only these two paths count — channel push is unreliable and never confirms delivery.
+// Note: IDs are SQLite AUTOINCREMENT from the broker's messages table. These are
+// monotonically increasing and never recycled within the same DB. If the broker DB
+// is deleted while peers are running, IDs could collide with this set — the prune
+// timer (keeping last 500) mitigates this edge case.
+const confirmedDeliveredIds = new Set<number>();
 
 // --- Piggyback delivery ---
 // Drains pending messages from the local buffer and returns formatted text
@@ -156,7 +161,8 @@ const pushedMessageIds = new Set<number>();
 async function drainPendingMessages(): Promise<string | null> {
   if (!myId) return null;
   const buffered = localMessageBuffer.splice(0, localMessageBuffer.length);
-  const unseen = buffered.filter((m) => !pushedMessageIds.has(m.id));
+  localBufferIds.clear();
+  const unseen = buffered.filter((m) => !confirmedDeliveredIds.has(m.id));
   if (unseen.length === 0) return null;
 
   const ids = unseen.map((m) => m.id);
@@ -166,7 +172,7 @@ async function drainPendingMessages(): Promise<string | null> {
     // Old broker without /ack-messages — degrade gracefully
   }
 
-  for (const id of ids) pushedMessageIds.add(id);
+  for (const id of ids) confirmedDeliveredIds.add(id);
 
   const lines = unseen.map((m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`);
   return `\n\n---\n${unseen.length} pending peer message(s):\n\n${lines.join("\n\n---\n\n")}`;
@@ -413,6 +419,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       try {
         // Drain local buffer (messages polled by the poll loop)
         const buffered = localMessageBuffer.splice(0, localMessageBuffer.length);
+        localBufferIds.clear();
 
         // Also check broker directly for anything poll loop hasn't grabbed
         const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
@@ -421,7 +428,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         const seen = new Set<number>();
         const allMessages: Message[] = [];
         for (const m of [...buffered, ...result.messages]) {
-          if (!seen.has(m.id) && !pushedMessageIds.has(m.id)) {
+          if (!seen.has(m.id) && !confirmedDeliveredIds.has(m.id)) {
             seen.add(m.id);
             allMessages.push(m);
           }
@@ -441,7 +448,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           // Old broker — degrade gracefully
         }
 
-        for (const id of ids) pushedMessageIds.add(id);
+        for (const id of ids) confirmedDeliveredIds.add(id);
 
         const lines = allMessages.map(
           (m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`
@@ -490,70 +497,59 @@ async function pollAndPushMessages() {
 
   try {
     const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
-    const ackedIds: number[] = [];
 
+    // Collect new messages that need buffering + channel push
+    const newMessages: Message[] = [];
     for (const msg of result.messages) {
-      // Skip if already delivered via any path
-      if (pushedMessageIds.has(msg.id)) {
-        ackedIds.push(msg.id);
-        continue;
-      }
+      if (confirmedDeliveredIds.has(msg.id)) continue;
+      if (localBufferIds.has(msg.id)) continue;
 
-      // Buffer locally for piggyback / check_messages fallback
       localMessageBuffer.push(msg);
+      localBufferIds.add(msg.id);
+      newMessages.push(msg);
+    }
 
-      // Look up the sender's info for context
-      let fromSummary = "";
-      let fromCwd = "";
-      try {
-        const peers = await brokerFetch<Peer[]>("/list-peers", {
-          scope: "machine",
-          cwd: myCwd,
-          git_root: myGitRoot,
-        });
-        const sender = peers.find((p) => p.id === msg.from_id);
-        if (sender) {
-          fromSummary = sender.summary;
-          fromCwd = sender.cwd;
-        }
-      } catch {
-        // Non-critical, proceed without sender info
-      }
+    if (newMessages.length === 0) return;
 
-      // Push as channel notification — this is what makes it immediate
+    // Fetch peer list once for sender metadata (not per-message)
+    let peerCache: Peer[] | null = null;
+    try {
+      peerCache = await brokerFetch<Peer[]>("/list-peers", {
+        scope: "machine",
+        cwd: myCwd,
+        git_root: myGitRoot,
+      });
+    } catch {
+      // Non-critical — channel push proceeds without sender context
+    }
+
+    // Best-effort channel push — fire and forget, never ack, never confirm.
+    // mcp.notification() is fire-and-forget over stdio and never throws even
+    // when the channel listener isn't active or the platform drops the notification.
+    for (const msg of newMessages) {
       try {
+        const sender = peerCache?.find((p) => p.id === msg.from_id);
         await mcp.notification({
           method: "notifications/claude/channel",
           params: {
             content: msg.text,
             meta: {
               from_id: msg.from_id,
-              from_summary: fromSummary,
-              from_cwd: fromCwd,
+              from_summary: sender?.summary ?? "",
+              from_cwd: sender?.cwd ?? "",
               sent_at: msg.sent_at,
               message_id: String(msg.id),
             },
           },
         });
-        log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
-        pushedMessageIds.add(msg.id);
-        ackedIds.push(msg.id);
+        log(`Channel push attempted for message ${msg.id} from ${msg.from_id}`);
       } catch (e) {
-        log(`Channel push failed for ${msg.from_id} (buffered for piggyback): ${e instanceof Error ? e.message : String(e)}`);
-        // Don't ack — leave for piggyback or check_messages
+        log(`Channel push failed for ${msg.from_id}: ${e instanceof Error ? e.message : String(e)}`);
       }
-    }
-
-    // Batch ack all successfully delivered messages
-    if (ackedIds.length > 0) {
-      try {
-        await brokerFetch("/ack-messages", { peer_id: myId, ids: ackedIds });
-      } catch {
-        // Old broker without /ack-messages — dedup set prevents duplicates
-      }
+      // Delivery confirmed ONLY when drainPendingMessages() or check_messages
+      // includes this message in a tool response that Claude actually reads.
     }
   } catch (e) {
-    // Broker might be down temporarily, don't crash
     log(`Poll error: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -648,14 +644,25 @@ async function main() {
     }
   }, HEARTBEAT_INTERVAL_MS);
 
-  // 8. Prune pushedMessageIds periodically (prevent unbounded growth)
+  // 8. Prune confirmedDeliveredIds and localMessageBuffer periodically
   const pruneTimer = setInterval(() => {
-    if (pushedMessageIds.size > 1000) {
-      const arr = [...pushedMessageIds];
+    if (confirmedDeliveredIds.size > 1000) {
+      const arr = [...confirmedDeliveredIds];
       const toRemove = arr.slice(0, arr.length - 500);
-      for (const id of toRemove) {
-        pushedMessageIds.delete(id);
+      for (const id of toRemove) confirmedDeliveredIds.delete(id);
+    }
+    // Cap the local buffer if no tool calls drain it for a long time.
+    // Ack pruned messages with broker to prevent zombie re-delivery cycle.
+    if (localMessageBuffer.length > 200) {
+      const removed = localMessageBuffer.splice(0, localMessageBuffer.length - 100);
+      const removedIds = removed.map((m) => m.id);
+      for (const id of removedIds) confirmedDeliveredIds.add(id);
+      if (myId) {
+        brokerFetch("/ack-messages", { peer_id: myId, ids: removedIds }).catch(() => {});
       }
+      localBufferIds.clear();
+      for (const m of localMessageBuffer) localBufferIds.add(m.id);
+      log(`WARNING: Pruned ${removed.length} undelivered messages from local buffer (overflow)`);
     }
   }, 60_000);
 
