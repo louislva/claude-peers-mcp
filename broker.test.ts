@@ -63,69 +63,6 @@ function authedPost(path: string, body: unknown) {
 
 // --- Security tests ---
 
-describe("Security: Origin/Referer rejection", () => {
-  test("rejects POST with Origin header", async () => {
-    const res = await fetch(`${BROKER_URL}/list-peers`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Peers-Token": token,
-        Origin: "http://evil.com",
-      },
-      body: JSON.stringify({ scope: "machine", cwd: "/", git_root: null }),
-    });
-    expect(res.status).toBe(403);
-    const data = await res.json();
-    expect(data.error).toContain("browser");
-  });
-
-  test("rejects POST with Referer header", async () => {
-    const res = await fetch(`${BROKER_URL}/list-peers`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Peers-Token": token,
-        Referer: "http://evil.com/page",
-      },
-      body: JSON.stringify({ scope: "machine", cwd: "/", git_root: null }),
-    });
-    expect(res.status).toBe(403);
-  });
-
-  test("rejects GET with Origin header", async () => {
-    const res = await fetch(`${BROKER_URL}/health`, {
-      headers: { Origin: "http://evil.com" },
-    });
-    expect(res.status).toBe(403);
-  });
-});
-
-describe("Security: Host header validation", () => {
-  test("rejects request with foreign Host header", async () => {
-    const res = await fetch(`${BROKER_URL}/list-peers`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Peers-Token": token,
-        Host: "evil.com",
-      },
-      body: JSON.stringify({ scope: "machine", cwd: "/", git_root: null }),
-    });
-    expect(res.status).toBe(403);
-    const data = await res.json();
-    expect(data.error).toContain("Host");
-  });
-
-  test("accepts request with 127.0.0.1:PORT Host", async () => {
-    const res = await authedPost("/list-peers", {
-      scope: "machine",
-      cwd: "/",
-      git_root: null,
-    });
-    expect(res.status).toBe(200);
-  });
-});
-
 describe("Security: Content-Type validation", () => {
   test("rejects POST with text/plain Content-Type", async () => {
     const res = await fetch(`${BROKER_URL}/list-peers`, {

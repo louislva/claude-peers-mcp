@@ -88,12 +88,10 @@ The broker auto-launches when the first session starts. It cleans up dead peers 
 
 ### Security
 
-The broker is protected against browser-based attacks (CSRF, DNS rebinding) with multiple layers:
+The broker is protected with:
 
 - **Shared secret token** — A random token is generated at `~/.claude-peers-token` on first startup. All POST requests must include it via the `X-Peers-Token` header. The MCP server and CLI read this file automatically.
-- **Origin/Referer rejection** — Requests with browser-set `Origin` or `Referer` headers are blocked.
-- **Host header validation** — Only `127.0.0.1` and `localhost` are accepted (prevents DNS rebinding).
-- **Content-Type enforcement** — Only `application/json` is accepted for POST requests.
+- **Content-Type enforcement** — Only `application/json` is accepted for POST requests (blocks browser CSRF by forcing CORS preflight).
 
 If you need to reset the token, delete `~/.claude-peers-token` and restart the broker.
 
