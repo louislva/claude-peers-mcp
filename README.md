@@ -86,6 +86,17 @@ A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude
 
 The broker auto-launches when the first session starts. It cleans up dead peers automatically. Everything is localhost-only.
 
+### Security
+
+The broker is protected against browser-based attacks (CSRF, DNS rebinding) with multiple layers:
+
+- **Shared secret token** — A random token is generated at `~/.claude-peers-token` on first startup. All POST requests must include it via the `X-Peers-Token` header. The MCP server and CLI read this file automatically.
+- **Origin/Referer rejection** — Requests with browser-set `Origin` or `Referer` headers are blocked.
+- **Host header validation** — Only `127.0.0.1` and `localhost` are accepted (prevents DNS rebinding).
+- **Content-Type enforcement** — Only `application/json` is accepted for POST requests.
+
+If you need to reset the token, delete `~/.claude-peers-token` and restart the broker.
+
 ## Auto-summary
 
 If you set `OPENAI_API_KEY` in your environment, each instance generates a brief summary on startup using `gpt-5.4-nano` (costs fractions of a cent). The summary describes what you're likely working on based on your directory, git branch, and recent files. Other instances see this when they call `list_peers`.
@@ -107,11 +118,12 @@ bun cli.ts kill-broker       # stop the broker
 
 ## Configuration
 
-| Environment variable | Default              | Description                           |
-| -------------------- | -------------------- | ------------------------------------- |
-| `CLAUDE_PEERS_PORT`  | `7899`               | Broker port                           |
-| `CLAUDE_PEERS_DB`    | `~/.claude-peers.db` | SQLite database path                  |
-| `OPENAI_API_KEY`     | —                    | Enables auto-summary via gpt-5.4-nano |
+| Environment variable      | Default                  | Description                           |
+| ------------------------- | ------------------------ | ------------------------------------- |
+| `CLAUDE_PEERS_PORT`       | `7899`                   | Broker port                           |
+| `CLAUDE_PEERS_DB`         | `~/.claude-peers.db`     | SQLite database path                  |
+| `CLAUDE_PEERS_TOKEN_PATH` | `~/.claude-peers-token`  | Auth token file path                  |
+| `OPENAI_API_KEY`          | —                        | Enables auto-summary via gpt-5.4-nano |
 
 ## Requirements
 

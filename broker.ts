@@ -25,6 +25,84 @@ import type {
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+const TOKEN_PATH = process.env.CLAUDE_PEERS_TOKEN_PATH ?? `${process.env.HOME}/.claude-peers-token`;
+
+// --- Security: shared secret token ---
+
+function generateToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function ensureToken(): Promise<string> {
+  try {
+    const existing = await Bun.file(TOKEN_PATH).text();
+    if (existing.trim().length >= 32) {
+      return existing.trim();
+    }
+  } catch {
+    // Token file doesn't exist yet
+  }
+  const token = generateToken();
+  await Bun.write(TOKEN_PATH, token);
+  // Restrict file permissions (owner read/write only)
+  const { chmodSync } = await import("node:fs");
+  try {
+    chmodSync(TOKEN_PATH, 0o600);
+  } catch {
+    // chmod may fail on Windows, non-critical
+  }
+  return token;
+}
+
+const BROKER_TOKEN = await ensureToken();
+
+/** Validate an incoming request. Returns an error Response if invalid, or null if OK. */
+function validateRequest(req: Request): Response | null {
+  // 1. Reject requests with Origin or Referer headers (browser-originated)
+  if (req.headers.get("origin") || req.headers.get("referer")) {
+    return Response.json(
+      { error: "Forbidden: browser requests not allowed" },
+      { status: 403 }
+    );
+  }
+
+  // 2. Validate Host header (DNS rebinding protection)
+  const host = req.headers.get("host");
+  if (host) {
+    const allowed = [`127.0.0.1:${PORT}`, `localhost:${PORT}`, "127.0.0.1", "localhost"];
+    if (!allowed.includes(host)) {
+      return Response.json(
+        { error: "Forbidden: invalid Host header" },
+        { status: 403 }
+      );
+    }
+  }
+
+  // For POST requests, apply additional checks
+  if (req.method === "POST") {
+    // 3. Require Content-Type: application/json (blocks text/plain CSRF)
+    const ct = req.headers.get("content-type");
+    if (!ct || !ct.includes("application/json")) {
+      return Response.json(
+        { error: "Bad Request: Content-Type must be application/json" },
+        { status: 400 }
+      );
+    }
+
+    // 4. Require shared secret token
+    const token = req.headers.get("x-peers-token");
+    if (token !== BROKER_TOKEN) {
+      return Response.json(
+        { error: "Unauthorized: invalid or missing X-Peers-Token" },
+        { status: 401 }
+      );
+    }
+  }
+
+  return null;
+}
 
 // --- Database setup ---
 
@@ -125,12 +203,9 @@ const markDelivered = db.prepare(`
 // --- Generate peer ID ---
 
 function generateId(): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let id = "";
-  for (let i = 0; i < 8; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return id;
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(36).padStart(2, "0")).slice(0, 8).join("").slice(0, 16);
 }
 
 // --- Request handlers ---
@@ -232,6 +307,10 @@ Bun.serve({
     const url = new URL(req.url);
     const path = url.pathname;
 
+    // Security: validate all incoming requests
+    const rejection = validateRequest(req);
+    if (rejection) return rejection;
+
     if (req.method !== "POST") {
       if (path === "/health") {
         return Response.json({ status: "ok", peers: (selectAllPeers.all() as Peer[]).length });
@@ -270,4 +349,4 @@ Bun.serve({
   },
 });
 
-console.error(`[claude-peers broker] listening on 127.0.0.1:${PORT} (db: ${DB_PATH})`);
+console.error(`[claude-peers broker] listening on 127.0.0.1:${PORT} (db: ${DB_PATH}, token: ${TOKEN_PATH})`);

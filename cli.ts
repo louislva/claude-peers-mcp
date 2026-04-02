@@ -13,12 +13,24 @@
 
 const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
+const TOKEN_PATH = process.env.CLAUDE_PEERS_TOKEN_PATH ?? `${process.env.HOME}/.claude-peers-token`;
+
+// Read broker auth token
+let brokerToken = "";
+try {
+  brokerToken = (await Bun.file(TOKEN_PATH).text()).trim();
+} catch {
+  // Token may not exist if broker hasn't started yet
+}
 
 async function brokerFetch<T>(path: string, body?: unknown): Promise<T> {
   const opts: RequestInit = body
     ? {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Peers-Token": brokerToken,
+        },
         body: JSON.stringify(body),
       }
     : {};
