@@ -105,13 +105,54 @@ bun cli.ts send <id> <msg>   # send a message into a Claude session
 bun cli.ts kill-broker       # stop the broker
 ```
 
+## Cross-machine setup
+
+By default the broker binds to `localhost:7899`, so peers on other machines can't reach it. To connect Claude Code instances across machines (e.g. Mac laptop + Linux server):
+
+**On the machine running the broker (server):**
+
+The broker already binds `0.0.0.0:7899` — make sure that port is reachable from the client machine (firewall, VPN, etc.).
+
+**On the remote machine (client):**
+
+Set `CLAUDE_PEERS_BROKER_URL` to point at the server when registering the MCP server:
+
+```bash
+claude mcp add --scope user --transport stdio claude-peers \
+  -- env CLAUDE_PEERS_BROKER_URL=http://SERVER_IP:7899 bun ~/claude-peers-mcp/server.ts
+```
+
+Or add it directly to `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "claude-peers": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["/path/to/claude-peers-mcp/server.ts"],
+      "env": {
+        "CLAUDE_PEERS_BROKER_URL": "http://SERVER_IP:7899"
+      }
+    }
+  }
+}
+```
+
+Both instances will now share the same broker and appear in each other's `list_peers` results.
+
+> **Gotcha:** `send_message` takes `to_id` (not `to`) as the parameter name. Passing the wrong key silently fails.
+
+> **Best practice:** Call `set_summary` at the start of each session so peers immediately know your context when they run `list_peers`.
+
 ## Configuration
 
-| Environment variable | Default              | Description                           |
-| -------------------- | -------------------- | ------------------------------------- |
-| `CLAUDE_PEERS_PORT`  | `7899`               | Broker port                           |
-| `CLAUDE_PEERS_DB`    | `~/.claude-peers.db` | SQLite database path                  |
-| `OPENAI_API_KEY`     | —                    | Enables auto-summary via gpt-5.4-nano |
+| Environment variable      | Default              | Description                                  |
+| ------------------------- | -------------------- | -------------------------------------------- |
+| `CLAUDE_PEERS_PORT`       | `7899`               | Broker port                                  |
+| `CLAUDE_PEERS_DB`         | `~/.claude-peers.db` | SQLite database path                         |
+| `CLAUDE_PEERS_BROKER_URL` | `http://127.0.0.1:7899` | Broker URL (override for cross-machine)   |
+| `OPENAI_API_KEY`          | —                    | Enables auto-summary via gpt-5.4-nano        |
 
 ## Requirements
 
