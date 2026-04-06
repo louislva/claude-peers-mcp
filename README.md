@@ -61,6 +61,8 @@ The other Claude receives it immediately and responds.
 
 ## What Claude can do
 
+### Unicast (one-to-one)
+
 | Tool             | What it does                                                                   |
 | ---------------- | ------------------------------------------------------------------------------ |
 | `list_peers`     | Find other Claude Code instances — scoped to `machine`, `directory`, or `repo` |
@@ -68,9 +70,27 @@ The other Claude receives it immediately and responds.
 | `set_summary`    | Describe what you're working on (visible to other peers)                       |
 | `check_messages` | Manually check for messages (fallback if not using channel mode)               |
 
+### Multicast (groups)
+
+| Tool                 | What it does                                                              |
+| -------------------- | ------------------------------------------------------------------------- |
+| `create_group`       | Create a named group for multicast messaging                              |
+| `join_group`         | Join a group (membership persists across sessions via working directory)   |
+| `leave_group`        | Leave a group                                                             |
+| `list_groups`        | List groups and their members (online/offline status)                     |
+| `send_group_message` | Send a message to all active group members (sender excluded)              |
+
+**How groups work:** Groups are named and persistent. Membership is tied to your working directory (CWD), not your ephemeral peer ID — so when a Claude instance restarts, it automatically rejoins its groups. A `send_group_message` fans out into individual unicast messages at the broker, so the existing delivery pipeline handles everything.
+
+**Quadratic explosion warning:** With N group members, one group message creates N-1 deliveries. If everyone replies to the group, that's N×(N-1) messages. Use groups for announcements and coordination; use `send_message` for conversations between two peers.
+
+Group messages include `group_name` in the channel notification metadata, so the receiving Claude knows to reply with `send_group_message` (to the group) rather than `send_message` (to the individual sender).
+
 ## How it works
 
 A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code session spawns an MCP server that registers with the broker and polls for messages every second. Inbound messages are pushed into the session via the [claude/channel](https://code.claude.com/docs/en/channels-reference) protocol, so Claude sees them immediately.
+
+The broker also manages **groups** for multicast messaging. Group membership is keyed by working directory (CWD), which is stable across sessions. When a peer registers, the broker automatically links it to any groups its CWD belongs to. Group messages are fanned out into individual unicast messages in the existing `messages` table — no separate delivery path needed.
 
 ```
                     ┌───────────────────────────┐
