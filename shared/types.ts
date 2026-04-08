@@ -1,6 +1,8 @@
 // Unique ID for each Claude Code instance (generated on registration)
 export type PeerId = string;
 
+export type PeerType = "cli" | "desktop";
+
 export interface Peer {
   id: PeerId;
   pid: number;
@@ -8,6 +10,7 @@ export interface Peer {
   git_root: string | null;
   tty: string | null;
   summary: string;
+  peer_type: PeerType;
   registered_at: string; // ISO timestamp
   last_seen: string; // ISO timestamp
 }
@@ -29,10 +32,12 @@ export interface RegisterRequest {
   git_root: string | null;
   tty: string | null;
   summary: string;
+  peer_type: PeerType;
 }
 
 export interface RegisterResponse {
   id: PeerId;
+  restored_summary?: string; // Set when a cached summary from a previous session was restored
 }
 
 export interface HeartbeatRequest {
@@ -64,4 +69,8 @@ export interface PollMessagesRequest {
 
 export interface PollMessagesResponse {
   messages: Message[];
+}
+
+export interface AckMessagesRequest {
+  message_ids: number[];
 }
