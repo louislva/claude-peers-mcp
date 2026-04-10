@@ -217,7 +217,7 @@ function handleUnregister(body: { id: string }): void {
 
 Bun.serve({
   port: PORT,
-  hostname: "127.0.0.1",
+  hostname: process.env.CLAUDE_PEERS_BIND ?? "127.0.0.1",
   async fetch(req) {
     const url = new URL(req.url);
     const path = url.pathname;
