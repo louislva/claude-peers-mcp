@@ -24,13 +24,16 @@ import type {
   Peer,
   RegisterResponse,
   PollMessagesResponse,
-  Message,
 } from "./shared/types.ts";
 import {
   generateSummary,
   getGitBranch,
   getRecentFiles,
 } from "./shared/summarize.ts";
+import {
+  formatClientCapabilities,
+  supportsClaudeChannel,
+} from "./shared/channel.ts";
 
 // --- Configuration ---
 
@@ -138,6 +141,8 @@ function getTty(): string | null {
 let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
+let inboundPollingStarted = false;
+let inboundPollTimer: ReturnType<typeof setInterval> | null = null;
 
 // --- MCP Server ---
 
@@ -448,6 +453,31 @@ async function pollAndPushMessages() {
   }
 }
 
+function startInboundMessagePolling() {
+  if (inboundPollingStarted) {
+    return;
+  }
+
+  const clientCapabilities = mcp.getClientCapabilities();
+  const clientVersion = mcp.getClientVersion();
+  const clientName = clientVersion?.name ?? "unknown";
+  const clientVersionText = clientVersion?.version ? ` ${clientVersion.version}` : "";
+
+  log(`Client connected: ${clientName}${clientVersionText}`);
+  log(`Client capabilities: ${formatClientCapabilities(clientCapabilities)}`);
+
+  if (!supportsClaudeChannel(clientCapabilities)) {
+    log(
+      "Client does not advertise experimental claude/channel; skipping background polling so check_messages remains reliable."
+    );
+    return;
+  }
+
+  inboundPollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
+  inboundPollingStarted = true;
+  log("Client supports claude/channel; background polling enabled.");
+}
+
 // --- Startup ---
 
 async function main() {
@@ -513,11 +543,15 @@ async function main() {
   }
 
   // 5. Connect MCP over stdio
+  mcp.oninitialized = () => {
+    startInboundMessagePolling();
+  };
+
   await mcp.connect(new StdioServerTransport());
   log("MCP connected");
 
-  // 6. Start polling for inbound messages
-  const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
+  // 6. Start polling for inbound messages only when the client supports channel push
+  //    Non-channel clients rely on check_messages so their messages stay queued.
 
   // 7. Start heartbeat
   const heartbeatTimer = setInterval(async () => {
@@ -532,7 +566,10 @@ async function main() {
 
   // 8. Clean up on exit
   const cleanup = async () => {
-    clearInterval(pollTimer);
+    if (inboundPollTimer) {
+      clearInterval(inboundPollTimer);
+      inboundPollTimer = null;
+    }
     clearInterval(heartbeatTimer);
     if (myId) {
       try {
