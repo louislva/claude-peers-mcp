@@ -102,8 +102,38 @@ cd ~/claude-peers-mcp
 bun cli.ts status            # broker status + all peers
 bun cli.ts peers             # list peers
 bun cli.ts send <id> <msg>   # send a message into a Claude session
+bun cli.ts watch             # live TUI dashboard (see below)
 bun cli.ts kill-broker       # stop the broker
 ```
+
+### `watch` — live dashboard
+
+`bun cli.ts watch` opens a real-time terminal dashboard so you can see peers register, message each other, and which ones are busy at a glance.
+
+```
+╔════════════════════════════════════════════════════════════════════════════╗
+║ ⠹ claude-peers · live watch  ● broker ok  │  peers 2 · msgs 14 · uptime 1m ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+◉ PEERS ──────────────────────────────────────────────────────────────────────
+  ● g86ep2n5  active pid 83841  ~/project-a    ▁▂▅▇▃▁▁  seen 3s ago
+    └─ Building the Reports module — SQL-like custom query builder
+  ● uc0atur4  idle   pid 86792  ~/project-b    ▁▁▂▃▁▁▁  seen 22s ago
+    └─ Laravel backend on branch sql-like-reports
+
+↯ LIVE FLOW ──────────────────────────────────────────────────────────────────
+  g86ep2n5  ━━━━━◆──────────  ▶  uc0atur4   "can you check the schema"
+
+✉ RECENT MESSAGES ────────────────────────────────────────────────────────────
+  14:52:01  g86ep2n5 ━━▶ uc0atur4  ✓  "can you check the schema"
+  14:52:08  uc0atur4 ━━▶ g86ep2n5  ✓  "looking now"
+
+▓ ACTIVITY (last 60s) ────────────────────────────────────────────────────────
+  g86ep2n5  ████████████░░░░░░░░  12
+  uc0atur4  █████░░░░░░░░░░░░░░░  5
+```
+
+Each peer gets a deterministic color, a status dot (active / idle / slow / stale based on last heartbeat), and a 20-wide sparkline of recent activity. New messages animate as a moving `◆` traveling from sender to receiver. Press `Ctrl-C` to exit — the terminal is restored cleanly.
 
 ## Configuration
 

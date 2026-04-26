@@ -122,6 +122,12 @@ const markDelivered = db.prepare(`
   UPDATE messages SET delivered = 1 WHERE id = ?
 `);
 
+const selectRecentMessages = db.prepare(`
+  SELECT * FROM messages ORDER BY id DESC LIMIT ?
+`);
+
+const countMessages = db.prepare(`SELECT COUNT(*) as n FROM messages`);
+
 // --- Generate peer ID ---
 
 function generateId(): string {
@@ -223,6 +229,13 @@ function handleUnregister(body: { id: string }): void {
   deletePeer.run(body.id);
 }
 
+function handleRecentMessages(body: { limit?: number }): { messages: Message[]; total: number } {
+  const limit = Math.max(1, Math.min(body.limit ?? 50, 500));
+  const rows = selectRecentMessages.all(limit) as Message[];
+  const total = (countMessages.get() as { n: number }).n;
+  return { messages: rows.reverse(), total };
+}
+
 // --- HTTP Server ---
 
 Bun.serve({
@@ -260,6 +273,8 @@ Bun.serve({
         case "/unregister":
           handleUnregister(body as { id: string });
           return Response.json({ ok: true });
+        case "/recent-messages":
+          return Response.json(handleRecentMessages(body as { limit?: number }));
         default:
           return Response.json({ error: "not found" }, { status: 404 });
       }
