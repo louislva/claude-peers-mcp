@@ -35,7 +35,7 @@ import {
 // --- Configuration ---
 
 const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
-const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
+const BROKER_URL = process.env.CLAUDE_PEERS_BROKER_URL ?? `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
@@ -138,6 +138,9 @@ function getTty(): string | null {
 let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
+
+// Buffer for messages consumed by polling but not delivered via channel push
+const undeliveredMessages: Array<Message & { from_summary?: string; from_cwd?: string }> = [];
 
 // --- MCP Server ---
 
@@ -364,20 +367,24 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         };
       }
       try {
+        // Collect from broker + drain the local buffer (messages consumed by poll but not pushed via channel)
         const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
-        if (result.messages.length === 0) {
+        const buffered = undeliveredMessages.splice(0);
+        const allMessages = [...buffered, ...result.messages];
+
+        if (allMessages.length === 0) {
           return {
             content: [{ type: "text" as const, text: "No new messages." }],
           };
         }
-        const lines = result.messages.map(
+        const lines = allMessages.map(
           (m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`
         );
         return {
           content: [
             {
               type: "text" as const,
-              text: `${result.messages.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`,
+              text: `${allMessages.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`,
             },
           ],
         };
@@ -426,21 +433,31 @@ async function pollAndPushMessages() {
         // Non-critical, proceed without sender info
       }
 
-      // Push as channel notification — this is what makes it immediate
-      await mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content: msg.text,
-          meta: {
-            from_id: msg.from_id,
-            from_summary: fromSummary,
-            from_cwd: fromCwd,
-            sent_at: msg.sent_at,
-          },
-        },
-      });
+      // Buffer for check_messages fallback (channel push may silently drop when blocked by org policy)
+      const bufferedMsg = { ...msg, from_summary: fromSummary, from_cwd: fromCwd };
+      undeliveredMessages.push(bufferedMsg);
 
-      log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+      // Also try channel push for instant delivery (best-effort)
+      try {
+        await mcp.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: msg.text,
+            meta: {
+              from_id: msg.from_id,
+              from_summary: fromSummary,
+              from_cwd: fromCwd,
+              sent_at: msg.sent_at,
+            },
+          },
+        });
+        // Channel push succeeded — remove from buffer to prevent unbounded growth
+        const idx = undeliveredMessages.indexOf(bufferedMsg);
+        if (idx !== -1) undeliveredMessages.splice(idx, 1);
+        log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+      } catch {
+        log(`Channel push failed for message from ${msg.from_id}`);
+      }
     }
   } catch (e) {
     // Broker might be down temporarily, don't crash

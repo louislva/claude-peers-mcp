@@ -58,18 +58,16 @@ db.run(`
   )
 `);
 
-// Clean up stale peers (PIDs that no longer exist) on startup
+// Clean up stale peers — use heartbeat staleness instead of PID check
+// so cross-container peers (different PID namespaces) aren't wrongly removed.
+const STALE_PEER_TIMEOUT_MS = 60_000;
+
 function cleanStalePeers() {
-  const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
-  for (const peer of peers) {
-    try {
-      // Check if process is still alive (signal 0 doesn't kill, just checks)
-      process.kill(peer.pid, 0);
-    } catch {
-      // Process doesn't exist, remove it
-      db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
-      db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
-    }
+  const cutoff = new Date(Date.now() - STALE_PEER_TIMEOUT_MS).toISOString();
+  const stale = db.query("SELECT id FROM peers WHERE last_seen < ?").all(cutoff) as { id: string }[];
+  for (const peer of stale) {
+    db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
+    db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
   }
 }
 
@@ -184,17 +182,9 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
     peers = peers.filter((p) => p.id !== body.exclude_id);
   }
 
-  // Verify each peer's process is still alive
-  return peers.filter((p) => {
-    try {
-      process.kill(p.pid, 0);
-      return true;
-    } catch {
-      // Clean up dead peer
-      deletePeer.run(p.id);
-      return false;
-    }
-  });
+  // Filter out stale peers by heartbeat (no PID check — cross-container safe)
+  const cutoff = new Date(Date.now() - STALE_PEER_TIMEOUT_MS).toISOString();
+  return peers.filter((p) => p.last_seen >= cutoff);
 }
 
 function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: string } {
@@ -227,7 +217,7 @@ function handleUnregister(body: { id: string }): void {
 
 Bun.serve({
   port: PORT,
-  hostname: "127.0.0.1",
+  hostname: process.env.CLAUDE_PEERS_BIND ?? "127.0.0.1",
   async fetch(req) {
     const url = new URL(req.url);
     const path = url.pathname;
