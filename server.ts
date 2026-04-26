@@ -139,6 +139,40 @@ let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
 
+// Auto-register if not registered or evicted by stale cleanup
+async function ensureRegistered(): Promise<boolean> {
+  if (myId) {
+    // Verify we're still in the broker's peer list
+    try {
+      const peers = await brokerFetch<Peer[]>("/list-peers", {
+        scope: "machine",
+        cwd: myCwd,
+        git_root: myGitRoot,
+      });
+      if (peers.some((p) => p.id === myId)) return true;
+    } catch {
+      return false;
+    }
+  }
+  // Not registered or evicted — re-register
+  try {
+    log("Auto-registering with broker...");
+    const reg = await brokerFetch<RegisterResponse>("/register", {
+      pid: process.pid,
+      cwd: myCwd,
+      git_root: myGitRoot,
+      tty: getTty(),
+      summary: "",
+    });
+    myId = reg.id;
+    log(`Auto-registered as peer ${myId}`);
+    return true;
+  } catch (e) {
+    log(`Auto-registration failed: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
+}
+
 // --- MCP Server ---
 
 const mcp = new Server(
@@ -297,10 +331,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     case "send_message": {
       const { to_id, message } = args as { to_id: string; message: string };
       if (!myId) {
-        return {
-          content: [{ type: "text" as const, text: "Not registered with broker yet" }],
-          isError: true,
-        };
+        const ok = await ensureRegistered();
+        if (!ok || !myId) {
+          return {
+            content: [{ type: "text" as const, text: "Not registered with broker and auto-registration failed" }],
+            isError: true,
+          };
+        }
       }
       try {
         const result = await brokerFetch<{ ok: boolean; error?: string }>("/send-message", {
@@ -333,10 +370,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     case "set_summary": {
       const { summary } = args as { summary: string };
       if (!myId) {
-        return {
-          content: [{ type: "text" as const, text: "Not registered with broker yet" }],
-          isError: true,
-        };
+        const ok = await ensureRegistered();
+        if (!ok || !myId) {
+          return {
+            content: [{ type: "text" as const, text: "Not registered with broker and auto-registration failed" }],
+            isError: true,
+          };
+        }
       }
       try {
         await brokerFetch("/set-summary", { id: myId, summary });
@@ -358,10 +398,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
     case "check_messages": {
       if (!myId) {
-        return {
-          content: [{ type: "text" as const, text: "Not registered with broker yet" }],
-          isError: true,
-        };
+        const ok = await ensureRegistered();
+        if (!ok || !myId) {
+          return {
+            content: [{ type: "text" as const, text: "Not registered with broker and auto-registration failed" }],
+            isError: true,
+          };
+        }
       }
       try {
         const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
@@ -402,7 +445,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 // --- Polling loop for inbound messages ---
 
 async function pollAndPushMessages() {
-  if (!myId) return;
+  if (!myId) {
+    await ensureRegistered();
+    if (!myId) return;
+  }
 
   try {
     const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
@@ -519,14 +565,17 @@ async function main() {
   // 6. Start polling for inbound messages
   const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
 
-  // 7. Start heartbeat
+  // 7. Start heartbeat (with auto-re-register on stale eviction)
   const heartbeatTimer = setInterval(async () => {
-    if (myId) {
-      try {
-        await brokerFetch("/heartbeat", { id: myId });
-      } catch {
-        // Non-critical
-      }
+    if (!myId) {
+      await ensureRegistered();
+      return;
+    }
+    try {
+      await brokerFetch("/heartbeat", { id: myId });
+    } catch {
+      // Heartbeat failed — check if evicted and re-register
+      await ensureRegistered();
     }
   }, HEARTBEAT_INTERVAL_MS);
 
