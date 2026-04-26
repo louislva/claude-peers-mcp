@@ -41,9 +41,21 @@ db.run(`
     tty TEXT,
     summary TEXT NOT NULL DEFAULT '',
     registered_at TEXT NOT NULL,
-    last_seen TEXT NOT NULL
+    last_seen TEXT NOT NULL,
+    summary_updated_at TEXT NOT NULL DEFAULT ''
   )
 `);
+
+// Migration: add summary_updated_at column to pre-existing peers tables.
+// bun:sqlite's ALTER TABLE doesn't support IF NOT EXISTS, so guard with PRAGMA.
+{
+  const cols = db.query("PRAGMA table_info(peers)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "summary_updated_at")) {
+    db.run(`ALTER TABLE peers ADD COLUMN summary_updated_at TEXT NOT NULL DEFAULT ''`);
+    // Backfill existing rows with last_seen as a reasonable default.
+    db.run(`UPDATE peers SET summary_updated_at = last_seen WHERE summary_updated_at = ''`);
+  }
+}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS messages (
@@ -81,8 +93,8 @@ setInterval(cleanStalePeers, 30_000);
 // --- Prepared statements ---
 
 const insertPeer = db.prepare(`
-  INSERT INTO peers (id, pid, cwd, git_root, tty, summary, registered_at, last_seen)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO peers (id, pid, cwd, git_root, tty, summary, registered_at, last_seen, summary_updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const updateLastSeen = db.prepare(`
@@ -90,7 +102,7 @@ const updateLastSeen = db.prepare(`
 `);
 
 const updateSummary = db.prepare(`
-  UPDATE peers SET summary = ? WHERE id = ?
+  UPDATE peers SET summary = ?, summary_updated_at = ? WHERE id = ?
 `);
 
 const deletePeer = db.prepare(`
@@ -145,7 +157,7 @@ function handleRegister(body: RegisterRequest): RegisterResponse {
     deletePeer.run(existing.id);
   }
 
-  insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, now, now);
+  insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, now, now, now);
   return { id };
 }
 
@@ -154,7 +166,8 @@ function handleHeartbeat(body: HeartbeatRequest): void {
 }
 
 function handleSetSummary(body: SetSummaryRequest): void {
-  updateSummary.run(body.summary, body.id);
+  const now = new Date().toISOString();
+  updateSummary.run(body.summary, now, body.id);
 }
 
 function handleListPeers(body: ListPeersRequest): Peer[] {

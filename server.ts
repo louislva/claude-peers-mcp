@@ -269,6 +269,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           if (p.git_root) parts.push(`Repo: ${p.git_root}`);
           if (p.tty) parts.push(`TTY: ${p.tty}`);
           if (p.summary) parts.push(`Summary: ${p.summary}`);
+          if (p.summary_updated_at) parts.push(`Summary updated: ${p.summary_updated_at}`);
           parts.push(`Last seen: ${p.last_seen}`);
           return parts.join("\n  ");
         });

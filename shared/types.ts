@@ -9,7 +9,8 @@ export interface Peer {
   tty: string | null;
   summary: string;
   registered_at: string; // ISO timestamp
-  last_seen: string; // ISO timestamp
+  last_seen: string; // ISO timestamp — updated on every heartbeat
+  summary_updated_at: string; // ISO timestamp — updated when summary changes (register or set_summary)
 }
 
 export interface Message {
