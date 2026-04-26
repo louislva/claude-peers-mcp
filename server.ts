@@ -39,6 +39,7 @@ const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
+const BROKER_LOG = `${process.env.HOME}/.claude-peers-broker.log`;
 
 // --- Broker communication ---
 
@@ -70,11 +71,11 @@ async function ensureBroker(): Promise<void> {
     return;
   }
 
-  log("Starting broker daemon...");
+  log(`Starting broker daemon (log: ${BROKER_LOG})...`);
   const proc = Bun.spawn(["bun", BROKER_SCRIPT], {
-    stdio: ["ignore", "ignore", "inherit"],
-    // Detach so the broker survives if this MCP server exits
-    // On macOS/Linux, the broker will keep running
+    // Redirect stderr to a log file instead of inheriting — inheriting causes
+    // SIGPIPE to kill the broker when Claude Code closes the MCP server's pipe.
+    stdio: ["ignore", "ignore", Bun.file(BROKER_LOG)],
   });
 
   // Unref so this process can exit without waiting for the broker
