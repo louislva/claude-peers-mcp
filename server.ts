@@ -38,7 +38,9 @@ const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
-const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
+// On Windows, URL.pathname returns a leading-slash form like "/C:/path/file.ts"
+// which Bun.spawn cannot resolve. Strip the leading slash before drive-letter.
+const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
 // --- Broker communication ---
 
