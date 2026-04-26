@@ -25,6 +25,8 @@ import type {
   RegisterResponse,
   PollMessagesResponse,
   Message,
+  Group,
+  GroupMember,
 } from "./shared/types.ts";
 import {
   generateSummary,
@@ -156,9 +158,16 @@ Read the from_id, from_summary, and from_cwd attributes to understand who sent t
 
 Available tools:
 - list_peers: Discover other Claude Code instances (scope: machine/directory/repo)
-- send_message: Send a message to another instance by ID
+- send_message: Send a message to another instance by ID (unicast)
 - set_summary: Set a 1-2 sentence summary of what you're working on (visible to other peers)
 - check_messages: Manually check for new messages
+- create_group: Create a named group for multicast messaging
+- join_group: Join a group (persists across sessions via your working directory)
+- leave_group: Leave a group
+- list_groups: List groups and their members
+- send_group_message: Send a message to all active members of a group (multicast)
+
+When you receive a group message, the channel notification will include a group_name attribute. To reply to the whole group, use send_group_message with that group name rather than send_message to the individual sender.
 
 When you start, proactively call set_summary to describe what you're working on. This helps other instances understand your context.`,
   }
@@ -225,6 +234,87 @@ const TOOLS = [
     inputSchema: {
       type: "object" as const,
       properties: {},
+    },
+  },
+  {
+    name: "create_group",
+    description:
+      "Create a named group for multicast messaging. Any peer can then join with join_group. Group names are unique and persist across sessions.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        name: {
+          type: "string" as const,
+          description: 'A short, unique name for the group (e.g. "family", "cpus", "project-x")',
+        },
+        description: {
+          type: "string" as const,
+          description: "Optional description of the group's purpose",
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "join_group",
+    description:
+      "Join a group. Membership is tied to your working directory, so it persists across sessions automatically. You will receive messages sent to this group via send_group_message.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        group_name: {
+          type: "string" as const,
+          description: "The name of the group to join",
+        },
+      },
+      required: ["group_name"],
+    },
+  },
+  {
+    name: "leave_group",
+    description: "Leave a group. You will no longer receive messages sent to this group.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        group_name: {
+          type: "string" as const,
+          description: "The name of the group to leave",
+        },
+      },
+      required: ["group_name"],
+    },
+  },
+  {
+    name: "list_groups",
+    description:
+      "List groups and their members. By default lists only groups you belong to. Set all to true to see every group.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        all: {
+          type: "boolean" as const,
+          description: "If true, list all groups on the broker, not just your own",
+        },
+      },
+    },
+  },
+  {
+    name: "send_group_message",
+    description:
+      "Send a message to all active members of a group (multicast). The message is delivered to every online group member except yourself.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        group_name: {
+          type: "string" as const,
+          description: "The name of the group to send to",
+        },
+        message: {
+          type: "string" as const,
+          description: "The message to send",
+        },
+      },
+      required: ["group_name", "message"],
     },
   },
 ];
@@ -394,6 +484,147 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
 
+    case "create_group": {
+      const { name: groupName, description } = args as { name: string; description?: string };
+      try {
+        const result = await brokerFetch<{ ok: boolean; error?: string }>("/create-group", {
+          name: groupName,
+          description,
+        });
+        if (!result.ok) {
+          return {
+            content: [{ type: "text" as const, text: `Failed to create group: ${result.error}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `Group '${groupName}' created.` }],
+        };
+      } catch (e) {
+        return {
+          content: [{ type: "text" as const, text: `Error creating group: ${e instanceof Error ? e.message : String(e)}` }],
+          isError: true,
+        };
+      }
+    }
+
+    case "join_group": {
+      const { group_name } = args as { group_name: string };
+      if (!myId) {
+        return {
+          content: [{ type: "text" as const, text: "Not registered with broker yet" }],
+          isError: true,
+        };
+      }
+      try {
+        const result = await brokerFetch<{ ok: boolean; error?: string }>("/join-group", {
+          group_name,
+          peer_id: myId,
+          member_cwd: myCwd,
+        });
+        if (!result.ok) {
+          return {
+            content: [{ type: "text" as const, text: `Failed to join group: ${result.error}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `Joined group '${group_name}'.` }],
+        };
+      } catch (e) {
+        return {
+          content: [{ type: "text" as const, text: `Error joining group: ${e instanceof Error ? e.message : String(e)}` }],
+          isError: true,
+        };
+      }
+    }
+
+    case "leave_group": {
+      const { group_name } = args as { group_name: string };
+      try {
+        const result = await brokerFetch<{ ok: boolean; error?: string }>("/leave-group", {
+          group_name,
+          member_cwd: myCwd,
+        });
+        if (!result.ok) {
+          return {
+            content: [{ type: "text" as const, text: `Failed to leave group: ${result.error}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `Left group '${group_name}'.` }],
+        };
+      } catch (e) {
+        return {
+          content: [{ type: "text" as const, text: `Error leaving group: ${e instanceof Error ? e.message : String(e)}` }],
+          isError: true,
+        };
+      }
+    }
+
+    case "list_groups": {
+      const { all } = (args ?? {}) as { all?: boolean };
+      try {
+        const result = await brokerFetch<{ groups: (Group & { members: GroupMember[] })[] }>(
+          "/list-groups",
+          all ? {} : { member_cwd: myCwd }
+        );
+
+        if (result.groups.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: all ? "No groups exist yet." : "You are not in any groups." }],
+          };
+        }
+
+        const lines = result.groups.map((g) => {
+          const memberList = g.members
+            .map((m) => `    ${m.member_cwd} ${m.active_peer_id ? `(online: ${m.active_peer_id})` : "(offline)"}`)
+            .join("\n");
+          return `Group: ${g.name}${g.description ? ` — ${g.description}` : ""}\n  Created: ${g.created_at}\n  Members:\n${memberList}`;
+        });
+
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n\n") }],
+        };
+      } catch (e) {
+        return {
+          content: [{ type: "text" as const, text: `Error listing groups: ${e instanceof Error ? e.message : String(e)}` }],
+          isError: true,
+        };
+      }
+    }
+
+    case "send_group_message": {
+      const { group_name, message } = args as { group_name: string; message: string };
+      if (!myId) {
+        return {
+          content: [{ type: "text" as const, text: "Not registered with broker yet" }],
+          isError: true,
+        };
+      }
+      try {
+        const result = await brokerFetch<{ ok: boolean; error?: string; sent_to: number }>(
+          "/send-group-message",
+          { from_id: myId, group_name, text: message }
+        );
+        if (!result.ok) {
+          return {
+            content: [{ type: "text" as const, text: `Failed to send to group: ${result.error}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `Message sent to group '${group_name}' (${result.sent_to} recipient(s)).` }],
+        };
+      } catch (e) {
+        return {
+          content: [{ type: "text" as const, text: `Error sending group message: ${e instanceof Error ? e.message : String(e)}` }],
+          isError: true,
+        };
+      }
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -427,20 +658,25 @@ async function pollAndPushMessages() {
       }
 
       // Push as channel notification — this is what makes it immediate
+      const meta: Record<string, string> = {
+        from_id: msg.from_id,
+        from_summary: fromSummary,
+        from_cwd: fromCwd,
+        sent_at: msg.sent_at,
+      };
+      if (msg.group_name) {
+        meta.group_name = msg.group_name;
+      }
+
       await mcp.notification({
         method: "notifications/claude/channel",
         params: {
           content: msg.text,
-          meta: {
-            from_id: msg.from_id,
-            from_summary: fromSummary,
-            from_cwd: fromCwd,
-            sent_at: msg.sent_at,
-          },
+          meta,
         },
       });
 
-      log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+      log(`Pushed message from ${msg.from_id}${msg.group_name ? ` (group: ${msg.group_name})` : ""}: ${msg.text.slice(0, 80)}`);
     }
   } catch (e) {
     // Broker might be down temporarily, don't crash

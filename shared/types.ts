@@ -19,6 +19,22 @@ export interface Message {
   text: string;
   sent_at: string; // ISO timestamp
   delivered: boolean;
+  group_name: string | null; // non-null if this message originated from a group send
+}
+
+// --- Group / multicast types ---
+
+export interface Group {
+  name: string;
+  description: string;
+  created_at: string; // ISO timestamp
+}
+
+export interface GroupMember {
+  group_name: string;
+  member_cwd: string;
+  active_peer_id: PeerId | null; // current session's peer ID, null if offline
+  joined_at: string; // ISO timestamp
 }
 
 // --- Broker API types ---
@@ -64,4 +80,32 @@ export interface PollMessagesRequest {
 
 export interface PollMessagesResponse {
   messages: Message[];
+}
+
+// --- Group broker API types ---
+
+export interface CreateGroupRequest {
+  name: string;
+  description?: string;
+}
+
+export interface JoinGroupRequest {
+  group_name: string;
+  peer_id: PeerId;
+  member_cwd: string;
+}
+
+export interface LeaveGroupRequest {
+  group_name: string;
+  member_cwd: string;
+}
+
+export interface ListGroupsRequest {
+  member_cwd?: string; // if provided, only return groups this CWD belongs to
+}
+
+export interface SendGroupMessageRequest {
+  from_id: PeerId;
+  group_name: string;
+  text: string;
 }

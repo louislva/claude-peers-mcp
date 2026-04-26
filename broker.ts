@@ -21,6 +21,13 @@ import type {
   PollMessagesResponse,
   Peer,
   Message,
+  CreateGroupRequest,
+  JoinGroupRequest,
+  LeaveGroupRequest,
+  ListGroupsRequest,
+  SendGroupMessageRequest,
+  Group,
+  GroupMember,
 } from "./shared/types.ts";
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
@@ -53,8 +60,31 @@ db.run(`
     text TEXT NOT NULL,
     sent_at TEXT NOT NULL,
     delivered INTEGER NOT NULL DEFAULT 0,
+    group_name TEXT,
     FOREIGN KEY (from_id) REFERENCES peers(id),
     FOREIGN KEY (to_id) REFERENCES peers(id)
+  )
+`);
+
+// Migration: add group_name column to messages if upgrading from older schema
+try { db.run("ALTER TABLE messages ADD COLUMN group_name TEXT"); } catch { /* already exists */ }
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS groups (
+    name TEXT PRIMARY KEY,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+  )
+`);
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS group_members (
+    group_name TEXT NOT NULL,
+    member_cwd TEXT NOT NULL,
+    active_peer_id TEXT,
+    joined_at TEXT NOT NULL,
+    PRIMARY KEY (group_name, member_cwd),
+    FOREIGN KEY (group_name) REFERENCES groups(name)
   )
 `);
 
@@ -67,6 +97,7 @@ function cleanStalePeers() {
       process.kill(peer.pid, 0);
     } catch {
       // Process doesn't exist, remove it
+      db.run("UPDATE group_members SET active_peer_id = NULL WHERE active_peer_id = ?", [peer.id]);
       db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
       db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
     }
@@ -110,8 +141,8 @@ const selectPeersByGitRoot = db.prepare(`
 `);
 
 const insertMessage = db.prepare(`
-  INSERT INTO messages (from_id, to_id, text, sent_at, delivered)
-  VALUES (?, ?, ?, ?, 0)
+  INSERT INTO messages (from_id, to_id, text, sent_at, delivered, group_name)
+  VALUES (?, ?, ?, ?, 0, ?)
 `);
 
 const selectUndelivered = db.prepare(`
@@ -146,6 +177,10 @@ function handleRegister(body: RegisterRequest): RegisterResponse {
   }
 
   insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, now, now);
+
+  // Auto-link this peer to any groups where its CWD is a member
+  db.run("UPDATE group_members SET active_peer_id = ? WHERE member_cwd = ?", [id, body.cwd]);
+
   return { id };
 }
 
@@ -204,7 +239,7 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
     return { ok: false, error: `Peer ${body.to_id} not found` };
   }
 
-  insertMessage.run(body.from_id, body.to_id, body.text, new Date().toISOString());
+  insertMessage.run(body.from_id, body.to_id, body.text, new Date().toISOString(), null);
   return { ok: true };
 }
 
@@ -220,7 +255,99 @@ function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
 }
 
 function handleUnregister(body: { id: string }): void {
+  db.run("UPDATE group_members SET active_peer_id = NULL WHERE active_peer_id = ?", [body.id]);
   deletePeer.run(body.id);
+}
+
+// --- Group handlers ---
+
+function handleCreateGroup(body: CreateGroupRequest): { ok: boolean; error?: string } {
+  const existing = db.query("SELECT name FROM groups WHERE name = ?").get(body.name);
+  if (existing) {
+    return { ok: false, error: `Group '${body.name}' already exists` };
+  }
+  db.run(
+    "INSERT INTO groups (name, description, created_at) VALUES (?, ?, ?)",
+    [body.name, body.description ?? "", new Date().toISOString()]
+  );
+  return { ok: true };
+}
+
+function handleJoinGroup(body: JoinGroupRequest): { ok: boolean; error?: string } {
+  const group = db.query("SELECT name FROM groups WHERE name = ?").get(body.group_name);
+  if (!group) {
+    return { ok: false, error: `Group '${body.group_name}' not found` };
+  }
+
+  // Upsert: if this CWD is already a member, just update the active peer ID
+  const existing = db.query(
+    "SELECT member_cwd FROM group_members WHERE group_name = ? AND member_cwd = ?"
+  ).get(body.group_name, body.member_cwd);
+
+  if (existing) {
+    db.run(
+      "UPDATE group_members SET active_peer_id = ? WHERE group_name = ? AND member_cwd = ?",
+      [body.peer_id, body.group_name, body.member_cwd]
+    );
+  } else {
+    db.run(
+      "INSERT INTO group_members (group_name, member_cwd, active_peer_id, joined_at) VALUES (?, ?, ?, ?)",
+      [body.group_name, body.member_cwd, body.peer_id, new Date().toISOString()]
+    );
+  }
+  return { ok: true };
+}
+
+function handleLeaveGroup(body: LeaveGroupRequest): { ok: boolean; error?: string } {
+  const result = db.run(
+    "DELETE FROM group_members WHERE group_name = ? AND member_cwd = ?",
+    [body.group_name, body.member_cwd]
+  );
+  if (result.changes === 0) {
+    return { ok: false, error: `Not a member of group '${body.group_name}'` };
+  }
+  return { ok: true };
+}
+
+function handleListGroups(body: ListGroupsRequest): { groups: (Group & { members: GroupMember[] })[] } {
+  let groups: Group[];
+  if (body.member_cwd) {
+    groups = db.query(
+      `SELECT DISTINCT g.* FROM groups g
+       JOIN group_members gm ON g.name = gm.group_name
+       WHERE gm.member_cwd = ?`
+    ).all(body.member_cwd) as Group[];
+  } else {
+    groups = db.query("SELECT * FROM groups").all() as Group[];
+  }
+
+  return {
+    groups: groups.map((g) => ({
+      ...g,
+      members: db.query(
+        "SELECT * FROM group_members WHERE group_name = ?"
+      ).all(g.name) as GroupMember[],
+    })),
+  };
+}
+
+function handleSendGroupMessage(body: SendGroupMessageRequest): { ok: boolean; error?: string; sent_to: number } {
+  const group = db.query("SELECT name FROM groups WHERE name = ?").get(body.group_name);
+  if (!group) {
+    return { ok: false, error: `Group '${body.group_name}' not found`, sent_to: 0 };
+  }
+
+  // Fan out: insert one message per active member, excluding sender
+  const members = db.query(
+    "SELECT active_peer_id FROM group_members WHERE group_name = ? AND active_peer_id IS NOT NULL AND active_peer_id != ?"
+  ).all(body.group_name, body.from_id) as { active_peer_id: string }[];
+
+  const now = new Date().toISOString();
+  for (const member of members) {
+    insertMessage.run(body.from_id, member.active_peer_id, body.text, now, body.group_name);
+  }
+
+  return { ok: true, sent_to: members.length };
 }
 
 // --- HTTP Server ---
@@ -260,6 +387,16 @@ Bun.serve({
         case "/unregister":
           handleUnregister(body as { id: string });
           return Response.json({ ok: true });
+        case "/create-group":
+          return Response.json(handleCreateGroup(body as CreateGroupRequest));
+        case "/join-group":
+          return Response.json(handleJoinGroup(body as JoinGroupRequest));
+        case "/leave-group":
+          return Response.json(handleLeaveGroup(body as LeaveGroupRequest));
+        case "/list-groups":
+          return Response.json(handleListGroups(body as ListGroupsRequest));
+        case "/send-group-message":
+          return Response.json(handleSendGroupMessage(body as SendGroupMessageRequest));
         default:
           return Response.json({ error: "not found" }, { status: 404 });
       }
