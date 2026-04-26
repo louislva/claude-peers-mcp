@@ -31,6 +31,7 @@ import {
   getGitBranch,
   getRecentFiles,
 } from "./shared/summarize.ts";
+import { spawnPeersInGhostty } from "./shared/spawner.ts";
 
 // --- Configuration ---
 
@@ -39,6 +40,7 @@ const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
+const MY_ROLE = process.env.CLAUDE_PEERS_ROLE ?? "";
 
 // --- Broker communication ---
 
@@ -227,6 +229,33 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "spawn_peers",
+    description:
+      "Spawn Claude Code instances in Ghostty terminal splits with assigned roles. Opens a new tab, splits it based on peer count (2=side by side, 3=L-shape, 4=grid), and starts each Claude with the given role. macOS + Ghostty 1.3+ required.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        roles: {
+          type: "array" as const,
+          items: { type: "string" as const },
+          description:
+            'Roles to assign to spawned peers (e.g. ["frontend-dev", "backend-dev"]). Max 4.',
+        },
+        prompt: {
+          type: "string" as const,
+          description:
+            "Optional startup prompt sent to each spawned Claude instance via --prompt flag.",
+        },
+        working_directory: {
+          type: "string" as const,
+          description:
+            "Working directory for spawned instances. Defaults to this instance's CWD.",
+        },
+      },
+      required: ["roles"],
+    },
+  },
 ];
 
 // --- Tool handlers ---
@@ -266,6 +295,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             `PID: ${p.pid}`,
             `CWD: ${p.cwd}`,
           ];
+          if (p.role) parts.push(`Role: ${p.role}`);
           if (p.git_root) parts.push(`Repo: ${p.git_root}`);
           if (p.tty) parts.push(`TTY: ${p.tty}`);
           if (p.summary) parts.push(`Summary: ${p.summary}`);
@@ -394,6 +424,45 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
 
+    case "spawn_peers": {
+      const { roles, prompt, working_directory } = args as {
+        roles: string[];
+        prompt?: string;
+        working_directory?: string;
+      };
+      try {
+        const result = await spawnPeersInGhostty({
+          roles,
+          cwd: working_directory ?? myCwd,
+          prompt,
+        });
+        if (!result.ok) {
+          return {
+            content: [{ type: "text" as const, text: `Failed to spawn peers: ${result.error}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Spawned ${result.spawned_roles!.length} peer(s) in Ghostty: ${result.spawned_roles!.join(", ")}`,
+            },
+          ],
+        };
+      } catch (e) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error spawning peers: ${e instanceof Error ? e.message : String(e)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -448,6 +517,23 @@ async function pollAndPushMessages() {
   }
 }
 
+// --- Coordinator helpers ---
+
+const COORDINATOR_ROLES = ["koordinator", "coordinator", "coord", "koordinatör"];
+
+export function findCoordinators(peers: Peer[]): Peer[] {
+  return peers.filter((p) =>
+    COORDINATOR_ROLES.includes(p.role.toLowerCase())
+  );
+}
+
+export function buildAnnounceMessage(role: string, cwd: string): string {
+  if (role) {
+    return `[auto-announce] Peer online oldu. Rol: ${role}, CWD: ${cwd}`;
+  }
+  return `[auto-announce] Peer online oldu. CWD: ${cwd}`;
+}
+
 // --- Startup ---
 
 async function main() {
@@ -494,9 +580,10 @@ async function main() {
     git_root: myGitRoot,
     tty,
     summary: initialSummary,
+    role: MY_ROLE,
   });
   myId = reg.id;
-  log(`Registered as peer ${myId}`);
+  log(`Registered as peer ${myId} (role: ${MY_ROLE || "(none)"})`);
 
   // If summary generation is still running, update it when done
   if (!initialSummary) {
@@ -516,10 +603,39 @@ async function main() {
   await mcp.connect(new StdioServerTransport());
   log("MCP connected");
 
-  // 6. Start polling for inbound messages
+  // 6. Auto-announce to coordinator(s)
+  if (MY_ROLE && myId) {
+    try {
+      const peers = await brokerFetch<Peer[]>("/list-peers", {
+        scope: myGitRoot ? "repo" : "directory",
+        cwd: myCwd,
+        git_root: myGitRoot,
+        exclude_id: myId,
+      });
+
+      const coordinators = findCoordinators(peers);
+      if (coordinators.length > 0) {
+        const announceMsg = buildAnnounceMessage(MY_ROLE, myCwd);
+        for (const coord of coordinators) {
+          await brokerFetch("/send-message", {
+            from_id: myId,
+            to_id: coord.id,
+            text: announceMsg,
+          });
+          log(`Auto-announced to coordinator ${coord.id} (role: ${coord.role})`);
+        }
+      } else {
+        log("No coordinator found for auto-announce");
+      }
+    } catch (e) {
+      log(`Auto-announce failed (non-critical): ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // 7. Start polling for inbound messages
   const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
 
-  // 7. Start heartbeat
+  // 8. Start heartbeat
   const heartbeatTimer = setInterval(async () => {
     if (myId) {
       try {
@@ -530,7 +646,7 @@ async function main() {
     }
   }, HEARTBEAT_INTERVAL_MS);
 
-  // 8. Clean up on exit
+  // 9. Clean up on exit
   const cleanup = async () => {
     clearInterval(pollTimer);
     clearInterval(heartbeatTimer);
@@ -549,7 +665,9 @@ async function main() {
   process.on("SIGTERM", cleanup);
 }
 
-main().catch((e) => {
-  log(`Fatal: ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((e) => {
+    log(`Fatal: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  });
+}

@@ -40,10 +40,17 @@ db.run(`
     git_root TEXT,
     tty TEXT,
     summary TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT '',
     registered_at TEXT NOT NULL,
     last_seen TEXT NOT NULL
   )
 `);
+
+try {
+  db.run("ALTER TABLE peers ADD COLUMN role TEXT NOT NULL DEFAULT ''");
+} catch {
+  // Column already exists, ignore
+}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS messages (
@@ -81,8 +88,8 @@ setInterval(cleanStalePeers, 30_000);
 // --- Prepared statements ---
 
 const insertPeer = db.prepare(`
-  INSERT INTO peers (id, pid, cwd, git_root, tty, summary, registered_at, last_seen)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO peers (id, pid, cwd, git_root, tty, summary, role, registered_at, last_seen)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const updateLastSeen = db.prepare(`
@@ -145,7 +152,7 @@ function handleRegister(body: RegisterRequest): RegisterResponse {
     deletePeer.run(existing.id);
   }
 
-  insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, now, now);
+  insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, body.role ?? "", now, now);
   return { id };
 }
 
