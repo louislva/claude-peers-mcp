@@ -24,6 +24,7 @@ import type {
   Peer,
   RegisterResponse,
   PollMessagesResponse,
+  BroadcastResponse,
   Message,
 } from "./shared/types.ts";
 import {
@@ -39,6 +40,22 @@ const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
+
+// Parse workspace from CLI args or environment variable
+function resolveWorkspace(): string | null {
+  const wsArgIndex = process.argv.indexOf("--workspace");
+  if (wsArgIndex !== -1) {
+    const value = process.argv[wsArgIndex + 1];
+    if (!value || value.startsWith("-")) {
+      log("--workspace flag requires a value");
+      process.exit(1);
+    }
+    return value;
+  }
+  return process.env.CLAUDE_PEERS_WORKSPACE ?? null;
+}
+
+const MY_WORKSPACE = resolveWorkspace();
 
 // --- Broker communication ---
 
@@ -138,6 +155,7 @@ function getTty(): string | null {
 let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
+const myWorkspace: string | null = MY_WORKSPACE;
 
 // --- MCP Server ---
 
@@ -155,10 +173,11 @@ IMPORTANT: When you receive a <channel source="claude-peers" ...> message, RESPO
 Read the from_id, from_summary, and from_cwd attributes to understand who sent the message. Reply by calling send_message with their from_id.
 
 Available tools:
-- list_peers: Discover other Claude Code instances (scope: machine/directory/repo)
+- list_peers: Discover other Claude Code instances (scope: machine/directory/repo/workspace)
 - send_message: Send a message to another instance by ID
 - set_summary: Set a 1-2 sentence summary of what you're working on (visible to other peers)
 - check_messages: Manually check for new messages
+- broadcast: Send a message to all members of your workspace (requires --workspace config)
 
 When you start, proactively call set_summary to describe what you're working on. This helps other instances understand your context.`,
   }
@@ -176,9 +195,9 @@ const TOOLS = [
       properties: {
         scope: {
           type: "string" as const,
-          enum: ["machine", "directory", "repo"],
+          enum: ["machine", "directory", "repo", "workspace"],
           description:
-            'Scope of peer discovery. "machine" = all instances on this computer. "directory" = same working directory. "repo" = same git repository (including worktrees or subdirectories).',
+            'Scope of peer discovery. "machine" = all instances on this computer. "directory" = same working directory. "repo" = same git repository. "workspace" = same named workspace group.',
         },
       },
       required: ["scope"],
@@ -227,6 +246,21 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "broadcast",
+    description:
+      "Send a message to all members of your workspace. Only works if you are in a workspace (configured via --workspace flag or CLAUDE_PEERS_WORKSPACE env var).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        message: {
+          type: "string" as const,
+          description: "The message to broadcast to all workspace members",
+        },
+      },
+      required: ["message"],
+    },
+  },
 ];
 
 // --- Tool handlers ---
@@ -240,13 +274,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   switch (name) {
     case "list_peers": {
-      const scope = (args as { scope: string }).scope as "machine" | "directory" | "repo";
+      const scope = (args as { scope: string }).scope as "machine" | "directory" | "repo" | "workspace";
       try {
         const peers = await brokerFetch<Peer[]>("/list-peers", {
           scope,
           cwd: myCwd,
           git_root: myGitRoot,
           exclude_id: myId,
+          workspace: myWorkspace,
         });
 
         if (peers.length === 0) {
@@ -267,6 +302,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             `CWD: ${p.cwd}`,
           ];
           if (p.git_root) parts.push(`Repo: ${p.git_root}`);
+          if (p.workspace) parts.push(`Workspace: ${p.workspace}`);
           if (p.tty) parts.push(`TTY: ${p.tty}`);
           if (p.summary) parts.push(`Summary: ${p.summary}`);
           parts.push(`Last seen: ${p.last_seen}`);
@@ -394,6 +430,58 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
 
+    case "broadcast": {
+      const { message } = args as { message: string };
+      if (!myId) {
+        return {
+          content: [{ type: "text" as const, text: "Not registered with broker yet" }],
+          isError: true,
+        };
+      }
+      if (!myWorkspace) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Not in a workspace. Configure with --workspace flag or CLAUDE_PEERS_WORKSPACE env var.",
+            },
+          ],
+          isError: true,
+        };
+      }
+      try {
+        const result = await brokerFetch<BroadcastResponse>("/broadcast", {
+          from_id: myId,
+          workspace: myWorkspace,
+          text: message,
+        });
+        if (!result.ok) {
+          return {
+            content: [{ type: "text" as const, text: `Broadcast failed: ${result.error}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Broadcast sent to ${result.sent_to} peer(s) in workspace "${myWorkspace}"`,
+            },
+          ],
+        };
+      } catch (e) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error broadcasting: ${e instanceof Error ? e.message : String(e)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -494,9 +582,11 @@ async function main() {
     git_root: myGitRoot,
     tty,
     summary: initialSummary,
+    workspace: myWorkspace,
   });
   myId = reg.id;
   log(`Registered as peer ${myId}`);
+  if (myWorkspace) log(`Workspace: ${myWorkspace}`);
 
   // If summary generation is still running, update it when done
   if (!initialSummary) {
