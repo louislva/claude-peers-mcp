@@ -1,5 +1,13 @@
-// Unique ID for each Claude Code instance (generated on registration)
+// Unique ID for each peer instance (generated on registration)
 export type PeerId = string;
+
+// Which AI coding agent is behind this peer
+export type ClientType = "claude-code" | "codex" | "cli";
+
+// --- Transport configuration ---
+
+export const DEFAULT_SOCKET_PATH =
+  process.env.CLAUDE_PEERS_SOCKET ?? `${process.env.HOME}/.claude/run/claude-peers.sock`;
 
 export interface Peer {
   id: PeerId;
@@ -7,6 +15,7 @@ export interface Peer {
   cwd: string;
   git_root: string | null;
   tty: string | null;
+  client_type: ClientType;
   summary: string;
   registered_at: string; // ISO timestamp
   last_seen: string; // ISO timestamp
@@ -28,6 +37,7 @@ export interface RegisterRequest {
   cwd: string;
   git_root: string | null;
   tty: string | null;
+  client_type?: ClientType;
   summary: string;
 }
 
