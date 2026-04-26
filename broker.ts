@@ -19,6 +19,7 @@ import type {
   SendMessageRequest,
   PollMessagesRequest,
   PollMessagesResponse,
+  AckMessagesRequest,
   Peer,
   Message,
 } from "./shared/types.ts";
@@ -40,6 +41,7 @@ db.run(`
     git_root TEXT,
     tty TEXT,
     summary TEXT NOT NULL DEFAULT '',
+    peer_type TEXT NOT NULL DEFAULT 'cli',
     registered_at TEXT NOT NULL,
     last_seen TEXT NOT NULL
   )
@@ -58,9 +60,18 @@ db.run(`
   )
 `);
 
+// Cache summaries by workspace so they survive across sessions
+db.run(`
+  CREATE TABLE IF NOT EXISTS summary_cache (
+    key TEXT PRIMARY KEY,
+    summary TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )
+`);
+
 // Clean up stale peers (PIDs that no longer exist) on startup
 function cleanStalePeers() {
-  const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
+  const peers = db.query("SELECT id, pid, peer_type FROM peers").all() as { id: string; pid: number; peer_type: string }[];
   for (const peer of peers) {
     try {
       // Check if process is still alive (signal 0 doesn't kill, just checks)
@@ -71,9 +82,21 @@ function cleanStalePeers() {
       db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
     }
   }
+
+  // Clean stale desktop peers by heartbeat timeout (PID check doesn't work — shared VM)
+  const staleTimeout = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  db.run("DELETE FROM messages WHERE delivered = 0 AND to_id IN (SELECT id FROM peers WHERE peer_type = 'desktop' AND last_seen < ?)", [staleTimeout]);
+  db.run("DELETE FROM peers WHERE peer_type = 'desktop' AND last_seen < ?", [staleTimeout]);
+
+  // TTL: delivered messages > 24h, summary cache > 7d
+  db.run("DELETE FROM messages WHERE delivered = 1 AND sent_at < ?", [new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()]);
+  db.run("DELETE FROM summary_cache WHERE updated_at < ?", [new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()]);
 }
 
 cleanStalePeers();
+
+// Reclaim disk space after initial cleanup
+db.run("VACUUM");
 
 // Periodically clean stale peers (every 30s)
 setInterval(cleanStalePeers, 30_000);
@@ -81,8 +104,8 @@ setInterval(cleanStalePeers, 30_000);
 // --- Prepared statements ---
 
 const insertPeer = db.prepare(`
-  INSERT INTO peers (id, pid, cwd, git_root, tty, summary, registered_at, last_seen)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO peers (id, pid, cwd, git_root, tty, summary, peer_type, registered_at, last_seen)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const updateLastSeen = db.prepare(`
@@ -118,6 +141,19 @@ const selectUndelivered = db.prepare(`
   SELECT * FROM messages WHERE to_id = ? AND delivered = 0 ORDER BY sent_at ASC
 `);
 
+const selectUndeliveredSince = db.prepare(`
+  SELECT * FROM messages WHERE to_id = ? AND delivered = 0 AND id > ? ORDER BY sent_at ASC
+`);
+
+const upsertSummaryCache = db.prepare(`
+  INSERT INTO summary_cache (key, summary, updated_at) VALUES (?, ?, ?)
+  ON CONFLICT(key) DO UPDATE SET summary = excluded.summary, updated_at = excluded.updated_at
+`);
+
+const selectSummaryCache = db.prepare(`
+  SELECT summary FROM summary_cache WHERE key = ?
+`);
+
 const markDelivered = db.prepare(`
   UPDATE messages SET delivered = 1 WHERE id = ?
 `);
@@ -133,28 +169,73 @@ function generateId(): string {
   return id;
 }
 
+// --- Summary cache helpers ---
+
+function summaryCacheKey(cwd: string, git_root: string | null): string {
+  return git_root ?? cwd;
+}
+
+function cacheSummary(cwd: string, git_root: string | null, summary: string): void {
+  if (!summary) return;
+  const key = summaryCacheKey(cwd, git_root);
+  upsertSummaryCache.run(key, summary, new Date().toISOString());
+}
+
+function getCachedSummary(cwd: string, git_root: string | null): string | null {
+  const key = summaryCacheKey(cwd, git_root);
+  const row = selectSummaryCache.get(key) as { summary: string } | null;
+  return row?.summary ?? null;
+}
+
 // --- Request handlers ---
 
 function handleRegister(body: RegisterRequest): RegisterResponse {
   const id = generateId();
   const now = new Date().toISOString();
 
-  // Remove any existing registration for this PID (re-registration)
-  const existing = db.query("SELECT id FROM peers WHERE pid = ?").get(body.pid) as { id: string } | null;
-  if (existing) {
-    deletePeer.run(existing.id);
+  const peerType = body.peer_type ?? "cli";
+  const isCli = peerType !== "desktop";
+
+  // Remove any existing registration for this PID (re-registration).
+  // Desktop sessions share one VM PID, so PID-based dedup would delete other active sessions.
+  if (isCli) {
+    const existing = db.query("SELECT id FROM peers WHERE pid = ?").get(body.pid) as { id: string } | null;
+    if (existing) {
+      deletePeer.run(existing.id);
+    }
   }
 
-  insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, now, now);
-  return { id };
+  // Carry forward cached summary for CLI sessions in the same workspace.
+  // Desktop sessions always set fresh summaries and would collide on one cache slot.
+  let summary = body.summary;
+  if (!summary && isCli) {
+    summary = getCachedSummary(body.cwd, body.git_root) ?? "";
+  }
+
+  if (summary && isCli) {
+    cacheSummary(body.cwd, body.git_root, summary);
+  }
+
+  insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, summary, peerType, now, now);
+  return { id, restored_summary: summary !== body.summary ? summary : undefined };
 }
 
 function handleHeartbeat(body: HeartbeatRequest): void {
   updateLastSeen.run(new Date().toISOString(), body.id);
 }
 
-function handleSetSummary(body: SetSummaryRequest): void {
+function handleSetSummary(body: SetSummaryRequest): { ok: boolean; error?: string } {
+  const peer = db.query("SELECT id, cwd, git_root, peer_type FROM peers WHERE id = ?").get(body.id) as { id: string; cwd: string; git_root: string | null; peer_type: string } | null;
+  if (!peer) {
+    return { ok: false, error: `Peer ${body.id} not found — re-register via /register` };
+  }
   updateSummary.run(body.summary, body.id);
+  // Persist to cache so future CLI sessions in this workspace inherit it.
+  // Desktop sessions are excluded — they set fresh summaries and would collide in shared workspaces.
+  if (peer.peer_type !== "desktop") {
+    cacheSummary(peer.cwd, peer.git_root, body.summary);
+  }
+  return { ok: true };
 }
 
 function handleListPeers(body: ListPeersRequest): Peer[] {
@@ -184,13 +265,14 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
     peers = peers.filter((p) => p.id !== body.exclude_id);
   }
 
-  // Verify each peer's process is still alive
+  // Verify each peer's process is still alive.
+  // Desktop peers share one VM PID — skip the kill check; heartbeat timeout handles staleness.
   return peers.filter((p) => {
+    if (p.peer_type === "desktop") return true;
     try {
       process.kill(p.pid, 0);
       return true;
     } catch {
-      // Clean up dead peer
       deletePeer.run(p.id);
       return false;
     }
@@ -210,12 +292,23 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
 
 function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   const messages = selectUndelivered.all(body.id) as Message[];
+  // Don't mark as delivered here — let the caller ack explicitly
+  // so messages aren't lost when channel push silently fails.
+  return { messages };
+}
 
-  // Mark them as delivered
-  for (const msg of messages) {
-    markDelivered.run(msg.id);
-  }
+function handleAckMessages(body: AckMessagesRequest): void {
+  db.transaction(() => {
+    for (const id of body.message_ids) {
+      markDelivered.run(id);
+    }
+  })();
+}
 
+function handlePeekMessages(body: { id: string; since_id?: number }): PollMessagesResponse {
+  const sinceId = body.since_id ?? 0;
+  const messages = selectUndeliveredSince.all(body.id, sinceId) as Message[];
+  // Don't mark as delivered — just peek
   return { messages };
 }
 
@@ -248,15 +341,24 @@ Bun.serve({
         case "/heartbeat":
           handleHeartbeat(body as HeartbeatRequest);
           return Response.json({ ok: true });
-        case "/set-summary":
-          handleSetSummary(body as SetSummaryRequest);
-          return Response.json({ ok: true });
+        case "/set-summary": {
+          const summaryResult = handleSetSummary(body as SetSummaryRequest);
+          if (!summaryResult.ok) {
+            return Response.json(summaryResult, { status: 404 });
+          }
+          return Response.json(summaryResult);
+        }
         case "/list-peers":
           return Response.json(handleListPeers(body as ListPeersRequest));
         case "/send-message":
           return Response.json(handleSendMessage(body as SendMessageRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
+        case "/ack-messages":
+          handleAckMessages(body as AckMessagesRequest);
+          return Response.json({ ok: true });
+        case "/peek-messages":
+          return Response.json(handlePeekMessages(body as { id: string; since_id?: number }));
         case "/unregister":
           handleUnregister(body as { id: string });
           return Response.json({ ok: true });
