@@ -65,3 +65,7 @@ export interface PollMessagesRequest {
 export interface PollMessagesResponse {
   messages: Message[];
 }
+
+export interface AckMessagesRequest {
+  message_ids: number[];
+}

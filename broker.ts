@@ -19,6 +19,7 @@ import type {
   SendMessageRequest,
   PollMessagesRequest,
   PollMessagesResponse,
+  AckMessagesRequest,
   Peer,
   Message,
 } from "./shared/types.ts";
@@ -210,13 +211,17 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
 
 function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   const messages = selectUndelivered.all(body.id) as Message[];
-
-  // Mark them as delivered
-  for (const msg of messages) {
-    markDelivered.run(msg.id);
-  }
-
+  // Don't mark as delivered here — let the caller ack explicitly
+  // so messages aren't lost when channel push silently fails.
   return { messages };
+}
+
+function handleAckMessages(body: AckMessagesRequest): void {
+  db.transaction(() => {
+    for (const id of body.message_ids) {
+      markDelivered.run(id);
+    }
+  })();
 }
 
 function handleUnregister(body: { id: string }): void {
@@ -257,6 +262,9 @@ Bun.serve({
           return Response.json(handleSendMessage(body as SendMessageRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
+        case "/ack-messages":
+          handleAckMessages(body as AckMessagesRequest);
+          return Response.json({ ok: true });
         case "/unregister":
           handleUnregister(body as { id: string });
           return Response.json({ ok: true });

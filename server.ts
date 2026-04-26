@@ -138,6 +138,10 @@ function getTty(): string | null {
 let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
+// Track message IDs already pushed via channel to avoid re-pushing every poll cycle.
+// Messages are NOT acked by the poll loop — only check_messages acks them —
+// so they remain available as a fallback when channels aren't active.
+const pushedMessageIds = new Set<number>();
 
 // --- MCP Server ---
 
@@ -370,6 +374,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             content: [{ type: "text" as const, text: "No new messages." }],
           };
         }
+
+        // Ack messages so they aren't returned again
+        const ids = result.messages.map((m) => m.id);
+        await brokerFetch("/ack-messages", { message_ids: ids });
+
+        // Also mark as pushed so the poll loop doesn't re-push them
+        for (const id of ids) {
+          pushedMessageIds.add(id);
+        }
+
         const lines = result.messages.map(
           (m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`
         );
@@ -408,6 +422,9 @@ async function pollAndPushMessages() {
     const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
 
     for (const msg of result.messages) {
+      // Skip messages already pushed in this session
+      if (pushedMessageIds.has(msg.id)) continue;
+
       // Look up the sender's info for context
       let fromSummary = "";
       let fromCwd = "";
@@ -426,7 +443,9 @@ async function pollAndPushMessages() {
         // Non-critical, proceed without sender info
       }
 
-      // Push as channel notification — this is what makes it immediate
+      // Push as channel notification — this is what makes it immediate.
+      // Don't ack here: if channels aren't active the push silently fails,
+      // and check_messages must still be able to retrieve these messages.
       await mcp.notification({
         method: "notifications/claude/channel",
         params: {
@@ -440,6 +459,7 @@ async function pollAndPushMessages() {
         },
       });
 
+      pushedMessageIds.add(msg.id);
       log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
     }
   } catch (e) {
