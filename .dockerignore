@@ -1,0 +1,16 @@
+node_modules
+.git
+.gitignore
+.dockerignore
+.DS_Store
+.idea
+.cache
+.env*
+*.md
+!shared/
+docs/
+examples/
+coverage/
+*.lcov
+*.tgz
+*.tsbuildinfo

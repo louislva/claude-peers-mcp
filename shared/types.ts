@@ -4,6 +4,7 @@ export type PeerId = string;
 export interface Peer {
   id: PeerId;
   pid: number;
+  hostname: string;
   cwd: string;
   git_root: string | null;
   tty: string | null;
@@ -25,6 +26,7 @@ export interface Message {
 
 export interface RegisterRequest {
   pid: number;
+  hostname: string;
   cwd: string;
   git_root: string | null;
   tty: string | null;
@@ -45,8 +47,9 @@ export interface SetSummaryRequest {
 }
 
 export interface ListPeersRequest {
-  scope: "machine" | "directory" | "repo";
+  scope: "machine" | "directory" | "repo" | "network";
   // The requesting peer's context (used for filtering)
+  hostname: string;
   cwd: string;
   git_root: string | null;
   exclude_id?: PeerId;

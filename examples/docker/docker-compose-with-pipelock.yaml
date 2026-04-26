@@ -1,0 +1,51 @@
+# claude-peers broker with pipelock security scanning
+#
+# Pipelock scans all broker traffic for secrets and injection.
+# The broker is on an internal network only pipelock can reach.
+#
+# Start: docker compose -f docker-compose-with-pipelock.yaml up -d
+# Connect: CLAUDE_PEERS_URL=http://localhost:7899 CLAUDE_PEERS_TOKEN=changeme
+
+services:
+  pipelock:
+    image: ghcr.io/luckypipewrench/pipelock:latest
+    command:
+      - "run"
+      - "--listen=127.0.0.1:18888"
+      - "--reverse-proxy"
+      - "--reverse-upstream=http://broker:7899"
+      - "--reverse-listen=:8888"
+      - "--config=/etc/pipelock/pipelock.yaml"
+    ports:
+      - "7899:8888"
+    volumes:
+      - ./pipelock.yaml:/etc/pipelock/pipelock.yaml:ro
+    networks:
+      - public
+      - internal
+    depends_on:
+      - broker
+    read_only: true
+    restart: unless-stopped
+
+  broker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      CLAUDE_PEERS_HOST: "0.0.0.0"
+      CLAUDE_PEERS_TOKEN: "${CLAUDE_PEERS_TOKEN:-changeme}"
+    volumes:
+      - peers-data:/data
+    networks:
+      - internal  # Only reachable by pipelock, not exposed
+    read_only: true
+    restart: unless-stopped
+
+networks:
+  public: {}
+  internal:
+    internal: true  # No external access — only containers on this network
+
+volumes:
+  peers-data:

@@ -10,11 +10,15 @@ Peer discovery and messaging MCP channel for Claude Code instances.
 
 ## Architecture
 
-- `broker.ts` — Singleton HTTP daemon on localhost:7899 + SQLite. Auto-launched by the MCP server.
+- `broker.ts` — HTTP daemon (default localhost:7899) + SQLite. Auto-launched by the MCP server, or deployed separately for cross-machine use.
 - `server.ts` — MCP stdio server, one per Claude Code instance. Connects to broker, exposes tools, pushes channel notifications.
+- `client.ts` — Framework-agnostic SDK for non-Claude agents (PeersClient class).
 - `shared/types.ts` — Shared TypeScript types for broker API.
 - `shared/summarize.ts` — Auto-summary generation via gpt-5.4-nano.
 - `cli.ts` — CLI utility for inspecting broker state.
+- `Dockerfile` — Container image for the broker.
+- `docs/guides/pipelock.md` — Setup guide for scanning peer messages with pipelock.
+- `examples/` — Docker Compose and Kubernetes deployment examples.
 
 ## Running
 
