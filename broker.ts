@@ -19,6 +19,7 @@ import type {
   SendMessageRequest,
   PollMessagesRequest,
   PollMessagesResponse,
+  AckMessagesRequest,
   Peer,
   Message,
 } from "./shared/types.ts";
@@ -122,6 +123,10 @@ const markDelivered = db.prepare(`
   UPDATE messages SET delivered = 1 WHERE id = ?
 `);
 
+const markDeliveredScoped = db.prepare(`
+  UPDATE messages SET delivered = 1 WHERE id = ? AND to_id = ?
+`);
+
 // --- Generate peer ID ---
 
 function generateId(): string {
@@ -210,13 +215,20 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
 
 function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   const messages = selectUndelivered.all(body.id) as Message[];
-
-  // Mark them as delivered
-  for (const msg of messages) {
-    markDelivered.run(msg.id);
-  }
-
+  // Read-only: caller must explicitly ack via /ack-messages
   return { messages };
+}
+
+function handleAckMessages(body: AckMessagesRequest): { ok: boolean; acked: number } {
+  const acked = db.transaction(() => {
+    let count = 0;
+    for (const id of body.ids) {
+      const result = markDeliveredScoped.run(id, body.peer_id);
+      count += result.changes;
+    }
+    return count;
+  })();
+  return { ok: true, acked };
 }
 
 function handleUnregister(body: { id: string }): void {
@@ -257,6 +269,8 @@ Bun.serve({
           return Response.json(handleSendMessage(body as SendMessageRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
+        case "/ack-messages":
+          return Response.json(handleAckMessages(body as AckMessagesRequest));
         case "/unregister":
           handleUnregister(body as { id: string });
           return Response.json({ ok: true });

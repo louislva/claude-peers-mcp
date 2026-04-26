@@ -25,6 +25,7 @@ import type {
   RegisterResponse,
   PollMessagesResponse,
   Message,
+  AckMessagesRequest,
 } from "./shared/types.ts";
 import {
   generateSummary,
@@ -139,6 +140,44 @@ let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
 
+// Local buffer for messages fetched by the poll loop, awaiting delivery
+// via piggyback (drainPendingMessages) or check_messages.
+const localMessageBuffer: Message[] = [];
+const localBufferIds = new Set<number>(); // O(1) dedup for poll loop
+
+// Messages confirmed delivered to Claude via tool response (piggyback or check_messages).
+// Only these two paths count — channel push is unreliable and never confirms delivery.
+// Note: IDs are SQLite AUTOINCREMENT from the broker's messages table. These are
+// monotonically increasing and never recycled within the same DB. If the broker DB
+// is deleted while peers are running, IDs could collide with this set — the prune
+// timer (keeping last 500) mitigates this edge case.
+const confirmedDeliveredIds = new Set<number>();
+
+// --- Piggyback delivery ---
+// Drains pending messages from the local buffer and returns formatted text
+// to append to any tool response. This ensures messages arrive even when
+// channel push fails — Claude gets them on the next tool call of any kind.
+
+async function drainPendingMessages(): Promise<string | null> {
+  if (!myId) return null;
+  const buffered = localMessageBuffer.splice(0, localMessageBuffer.length);
+  localBufferIds.clear();
+  const unseen = buffered.filter((m) => !confirmedDeliveredIds.has(m.id));
+  if (unseen.length === 0) return null;
+
+  const ids = unseen.map((m) => m.id);
+  try {
+    await brokerFetch("/ack-messages", { peer_id: myId, ids });
+  } catch {
+    // Old broker without /ack-messages — degrade gracefully
+  }
+
+  for (const id of ids) confirmedDeliveredIds.add(id);
+
+  const lines = unseen.map((m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`);
+  return `\n\n---\n${unseen.length} pending peer message(s):\n\n${lines.join("\n\n---\n\n")}`;
+}
+
 // --- MCP Server ---
 
 const mcp = new Server(
@@ -159,6 +198,7 @@ Available tools:
 - send_message: Send a message to another instance by ID
 - set_summary: Set a 1-2 sentence summary of what you're working on (visible to other peers)
 - check_messages: Manually check for new messages
+- whoami: Get your own peer ID, CWD, and git root
 
 When you start, proactively call set_summary to describe what you're working on. This helps other instances understand your context.`,
   }
@@ -227,6 +267,15 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "whoami",
+    description:
+      "Returns this Claude Code instance's own peer ID, working directory, and git root. Useful for telling other peers how to message you.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
 ];
 
 // --- Tool handlers ---
@@ -249,12 +298,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           exclude_id: myId,
         });
 
+        const pending = await drainPendingMessages();
+
         if (peers.length === 0) {
           return {
             content: [
               {
                 type: "text" as const,
-                text: `No other Claude Code instances found (scope: ${scope}).`,
+                text: `No other Claude Code instances found (scope: ${scope}).${pending ?? ""}`,
               },
             ],
           };
@@ -277,7 +328,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           content: [
             {
               type: "text" as const,
-              text: `Found ${peers.length} peer(s) (scope: ${scope}):\n\n${lines.join("\n\n")}`,
+              text: `Found ${peers.length} peer(s) (scope: ${scope}):\n\n${lines.join("\n\n")}${pending ?? ""}`,
             },
           ],
         };
@@ -314,8 +365,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             isError: true,
           };
         }
+        const pending = await drainPendingMessages();
         return {
-          content: [{ type: "text" as const, text: `Message sent to peer ${to_id}` }],
+          content: [{ type: "text" as const, text: `Message sent to peer ${to_id}${pending ?? ""}` }],
         };
       } catch (e) {
         return {
@@ -340,8 +392,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       try {
         await brokerFetch("/set-summary", { id: myId, summary });
+        const pending = await drainPendingMessages();
         return {
-          content: [{ type: "text" as const, text: `Summary updated: "${summary}"` }],
+          content: [{ type: "text" as const, text: `Summary updated: "${summary}"${pending ?? ""}` }],
         };
       } catch (e) {
         return {
@@ -364,20 +417,47 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         };
       }
       try {
+        // Drain local buffer (messages polled by the poll loop)
+        const buffered = localMessageBuffer.splice(0, localMessageBuffer.length);
+        localBufferIds.clear();
+
+        // Also check broker directly for anything poll loop hasn't grabbed
         const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
-        if (result.messages.length === 0) {
+
+        // Merge and deduplicate by message ID
+        const seen = new Set<number>();
+        const allMessages: Message[] = [];
+        for (const m of [...buffered, ...result.messages]) {
+          if (!seen.has(m.id) && !confirmedDeliveredIds.has(m.id)) {
+            seen.add(m.id);
+            allMessages.push(m);
+          }
+        }
+
+        if (allMessages.length === 0) {
           return {
             content: [{ type: "text" as const, text: "No new messages." }],
           };
         }
-        const lines = result.messages.map(
+
+        // Explicitly ack all messages we're returning
+        const ids = allMessages.map((m) => m.id);
+        try {
+          await brokerFetch("/ack-messages", { peer_id: myId, ids });
+        } catch {
+          // Old broker — degrade gracefully
+        }
+
+        for (const id of ids) confirmedDeliveredIds.add(id);
+
+        const lines = allMessages.map(
           (m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`
         );
         return {
           content: [
             {
               type: "text" as const,
-              text: `${result.messages.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`,
+              text: `${allMessages.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`,
             },
           ],
         };
@@ -394,6 +474,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
 
+    case "whoami": {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Peer ID: ${myId ?? "(not registered)"}\nCWD: ${myCwd}\nGit root: ${myGitRoot ?? "(none)"}`,
+          },
+        ],
+      };
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -407,43 +498,58 @@ async function pollAndPushMessages() {
   try {
     const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
 
+    // Collect new messages that need buffering + channel push
+    const newMessages: Message[] = [];
     for (const msg of result.messages) {
-      // Look up the sender's info for context
-      let fromSummary = "";
-      let fromCwd = "";
-      try {
-        const peers = await brokerFetch<Peer[]>("/list-peers", {
-          scope: "machine",
-          cwd: myCwd,
-          git_root: myGitRoot,
-        });
-        const sender = peers.find((p) => p.id === msg.from_id);
-        if (sender) {
-          fromSummary = sender.summary;
-          fromCwd = sender.cwd;
-        }
-      } catch {
-        // Non-critical, proceed without sender info
-      }
+      if (confirmedDeliveredIds.has(msg.id)) continue;
+      if (localBufferIds.has(msg.id)) continue;
 
-      // Push as channel notification — this is what makes it immediate
-      await mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content: msg.text,
-          meta: {
-            from_id: msg.from_id,
-            from_summary: fromSummary,
-            from_cwd: fromCwd,
-            sent_at: msg.sent_at,
-          },
-        },
+      localMessageBuffer.push(msg);
+      localBufferIds.add(msg.id);
+      newMessages.push(msg);
+    }
+
+    if (newMessages.length === 0) return;
+
+    // Fetch peer list once for sender metadata (not per-message)
+    let peerCache: Peer[] | null = null;
+    try {
+      peerCache = await brokerFetch<Peer[]>("/list-peers", {
+        scope: "machine",
+        cwd: myCwd,
+        git_root: myGitRoot,
       });
+    } catch {
+      // Non-critical — channel push proceeds without sender context
+    }
 
-      log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+    // Best-effort channel push — fire and forget, never ack, never confirm.
+    // mcp.notification() is fire-and-forget over stdio and never throws even
+    // when the channel listener isn't active or the platform drops the notification.
+    for (const msg of newMessages) {
+      try {
+        const sender = peerCache?.find((p) => p.id === msg.from_id);
+        await mcp.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: msg.text,
+            meta: {
+              from_id: msg.from_id,
+              from_summary: sender?.summary ?? "",
+              from_cwd: sender?.cwd ?? "",
+              sent_at: msg.sent_at,
+              message_id: String(msg.id),
+            },
+          },
+        });
+        log(`Channel push attempted for message ${msg.id} from ${msg.from_id}`);
+      } catch (e) {
+        log(`Channel push failed for ${msg.from_id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      // Delivery confirmed ONLY when drainPendingMessages() or check_messages
+      // includes this message in a tool response that Claude actually reads.
     }
   } catch (e) {
-    // Broker might be down temporarily, don't crash
     log(`Poll error: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -516,8 +622,16 @@ async function main() {
   await mcp.connect(new StdioServerTransport());
   log("MCP connected");
 
-  // 6. Start polling for inbound messages
-  const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
+  // 6. Start serialized polling for inbound messages
+  let pollActive = true;
+
+  async function schedulePoll() {
+    if (!pollActive) return;
+    await pollAndPushMessages();
+    if (pollActive) setTimeout(schedulePoll, POLL_INTERVAL_MS);
+  }
+
+  setTimeout(schedulePoll, POLL_INTERVAL_MS);
 
   // 7. Start heartbeat
   const heartbeatTimer = setInterval(async () => {
@@ -530,10 +644,33 @@ async function main() {
     }
   }, HEARTBEAT_INTERVAL_MS);
 
-  // 8. Clean up on exit
+  // 8. Prune confirmedDeliveredIds and localMessageBuffer periodically
+  const pruneTimer = setInterval(() => {
+    if (confirmedDeliveredIds.size > 1000) {
+      const arr = [...confirmedDeliveredIds];
+      const toRemove = arr.slice(0, arr.length - 500);
+      for (const id of toRemove) confirmedDeliveredIds.delete(id);
+    }
+    // Cap the local buffer if no tool calls drain it for a long time.
+    // Ack pruned messages with broker to prevent zombie re-delivery cycle.
+    if (localMessageBuffer.length > 200) {
+      const removed = localMessageBuffer.splice(0, localMessageBuffer.length - 100);
+      const removedIds = removed.map((m) => m.id);
+      for (const id of removedIds) confirmedDeliveredIds.add(id);
+      if (myId) {
+        brokerFetch("/ack-messages", { peer_id: myId, ids: removedIds }).catch(() => {});
+      }
+      localBufferIds.clear();
+      for (const m of localMessageBuffer) localBufferIds.add(m.id);
+      log(`WARNING: Pruned ${removed.length} undelivered messages from local buffer (overflow)`);
+    }
+  }, 60_000);
+
+  // 9. Clean up on exit
   const cleanup = async () => {
-    clearInterval(pollTimer);
+    pollActive = false;
     clearInterval(heartbeatTimer);
+    clearInterval(pruneTimer);
     if (myId) {
       try {
         await brokerFetch("/unregister", { id: myId });
