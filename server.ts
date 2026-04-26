@@ -100,7 +100,7 @@ function log(msg: string) {
 
 async function getGitRoot(cwd: string): Promise<string | null> {
   try {
-    const proc = Bun.spawn(["git", "rev-parse", "--show-toplevel"], {
+    const proc = Bun.spawn(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], {
       cwd,
       stdout: "pipe",
       stderr: "ignore",
