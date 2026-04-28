@@ -370,6 +370,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             content: [{ type: "text" as const, text: "No new messages." }],
           };
         }
+
+        const ids = result.messages.map((m) => m.id);
+        try {
+          await brokerFetch("/ack-messages", { peer_id: myId, ids });
+        } catch (e) {
+          log(`Failed to ack messages: ${e instanceof Error ? e.message : String(e)}`);
+        }
+
         const lines = result.messages.map(
           (m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`
         );
@@ -406,9 +414,9 @@ async function pollAndPushMessages() {
 
   try {
     const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+    const ackedIds: number[] = [];
 
     for (const msg of result.messages) {
-      // Look up the sender's info for context
       let fromSummary = "";
       let fromCwd = "";
       try {
@@ -426,24 +434,35 @@ async function pollAndPushMessages() {
         // Non-critical, proceed without sender info
       }
 
-      // Push as channel notification — this is what makes it immediate
-      await mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content: msg.text,
-          meta: {
-            from_id: msg.from_id,
-            from_summary: fromSummary,
-            from_cwd: fromCwd,
-            sent_at: msg.sent_at,
+      try {
+        await mcp.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: msg.text,
+            meta: {
+              message_id: msg.id,
+              from_id: msg.from_id,
+              from_summary: fromSummary,
+              from_cwd: fromCwd,
+              sent_at: msg.sent_at,
+            },
           },
-        },
-      });
+        });
+        ackedIds.push(msg.id);
+        log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+      } catch (e) {
+        log(`Failed to push message ${msg.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
 
-      log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+    if (ackedIds.length > 0) {
+      try {
+        await brokerFetch("/ack-messages", { peer_id: myId, ids: ackedIds });
+      } catch (e) {
+        log(`Failed to ack messages: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
   } catch (e) {
-    // Broker might be down temporarily, don't crash
     log(`Poll error: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
@@ -516,8 +535,23 @@ async function main() {
   await mcp.connect(new StdioServerTransport());
   log("MCP connected");
 
-  // 6. Start polling for inbound messages
-  const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
+  // 6. Start polling for inbound messages (serialized to prevent overlapping polls)
+  const POLL_TIMEOUT_MS = 10_000;
+  let pollTimer: Timer;
+  async function pollLoop() {
+    try {
+      await Promise.race([
+        pollAndPushMessages(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("poll timed out")), POLL_TIMEOUT_MS)
+        ),
+      ]);
+    } catch (e) {
+      log(`Poll error: ${e}`);
+    }
+    pollTimer = setTimeout(pollLoop, POLL_INTERVAL_MS);
+  }
+  pollTimer = setTimeout(pollLoop, POLL_INTERVAL_MS);
 
   // 7. Start heartbeat
   const heartbeatTimer = setInterval(async () => {
@@ -532,7 +566,7 @@ async function main() {
 
   // 8. Clean up on exit
   const cleanup = async () => {
-    clearInterval(pollTimer);
+    clearTimeout(pollTimer);
     clearInterval(heartbeatTimer);
     if (myId) {
       try {
