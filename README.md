@@ -33,19 +33,31 @@ claude mcp add --scope user --transport stdio claude-peers -- bun ~/claude-peers
 
 Replace `~/claude-peers-mcp` with wherever you cloned it.
 
-### 3. Run Claude Code with the channel
+### 3. Start Claude Code
+
+The tools work in any Claude Code session. Just start normally:
 
 ```bash
-claude --dangerously-skip-permissions --dangerously-load-development-channels server:claude-peers
+claude
 ```
 
-That's it. The broker daemon starts automatically the first time.
+Messages are delivered **automatically** whenever Claude calls any claude-peers tool (`list_peers`, `send_message`, `set_summary`) — they piggyback on the tool response. This works with any auth method, including Bedrock and API keys.
 
-> **Tip:** Add it to an alias so you don't have to type it every time:
+For **instant push delivery** (messages arrive mid-task without waiting for a tool call), start with the channel flag instead:
+
+```bash
+claude --dangerously-load-development-channels server:claude-peers
+```
+
+> **Note:** Channel push requires claude.ai login — Bedrock and API key auth fall back to piggyback delivery automatically.
+
+> **Tip:** Add an alias so you don't have to type it every time:
 >
 > ```bash
 > alias claudepeers='claude --dangerously-load-development-channels server:claude-peers'
 > ```
+
+The broker daemon starts automatically the first time.
 
 ### 4. Open a second session and try it
 
@@ -64,13 +76,18 @@ The other Claude receives it immediately and responds.
 | Tool             | What it does                                                                   |
 | ---------------- | ------------------------------------------------------------------------------ |
 | `list_peers`     | Find other Claude Code instances — scoped to `machine`, `directory`, or `repo` |
-| `send_message`   | Send a message to another instance by ID (arrives instantly via channel push)  |
+| `send_message`   | Send a message to another instance by ID                                       |
 | `set_summary`    | Describe what you're working on (visible to other peers)                       |
-| `check_messages` | Manually check for messages (fallback if not using channel mode)               |
+| `check_messages` | Manually check for messages                                                    |
 
 ## How it works
 
-A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code session spawns an MCP server that registers with the broker and polls for messages every second. Inbound messages are pushed into the session via the [claude/channel](https://code.claude.com/docs/en/channels-reference) protocol, so Claude sees them immediately.
+A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code session spawns an MCP server that registers with the broker and polls for messages every second.
+
+Messages are delivered through two paths:
+
+- **Channel push** (with `--dangerously-load-development-channels`): inbound messages are pushed into the session via the [claude/channel](https://code.claude.com/docs/en/channels-reference) protocol, so Claude sees them immediately.
+- **Piggyback delivery** (default): pending messages are appended to any claude-peers tool response. When Claude calls `list_peers`, `send_message`, or `set_summary`, it gets the tool result plus any waiting messages. No channels required — works with any auth method.
 
 ```
                     ┌───────────────────────────┐
@@ -117,4 +134,4 @@ bun cli.ts kill-broker       # stop the broker
 
 - [Bun](https://bun.sh)
 - Claude Code v2.1.80+
-- claude.ai login (channels require it — API key auth won't work)
+- Any auth method (Bedrock, API key, claude.ai). Channel push requires claude.ai login; piggyback delivery works with all.

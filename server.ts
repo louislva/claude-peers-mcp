@@ -139,6 +139,10 @@ let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
 
+// Track message IDs already pushed via channel notification to avoid duplicates.
+// Messages are only truly consumed when Claude calls check_messages (which uses /poll-messages).
+const pushedMessageIds = new Set<number>();
+
 // --- MCP Server ---
 
 const mcp = new Server(
@@ -160,7 +164,9 @@ Available tools:
 - set_summary: Set a 1-2 sentence summary of what you're working on (visible to other peers)
 - check_messages: Manually check for new messages
 
-When you start, proactively call set_summary to describe what you're working on. This helps other instances understand your context.`,
+When you start, proactively call set_summary to describe what you're working on. This helps other instances understand your context.
+
+IMPORTANT: Channel push notifications only work when Claude Code is started with --dangerously-load-development-channels server:claude-peers (or --channels). If you are NOT receiving <channel> messages, call check_messages periodically to poll for new messages manually. This is the reliable fallback that always works regardless of how Claude Code was started.`,
   }
 );
 
@@ -229,6 +235,39 @@ const TOOLS = [
   },
 ];
 
+// --- Piggyback delivery ---
+// Drain pending messages and return them as extra content items to append to any tool response.
+// This is the reliable delivery path when channels aren't available (e.g., Bedrock auth):
+// messages arrive automatically whenever Claude interacts with any claude-peers tool.
+
+async function drainPendingMessages(): Promise<Array<{ type: "text"; text: string }>> {
+  if (!myId) return [];
+
+  try {
+    const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+
+    for (const msg of result.messages) {
+      pushedMessageIds.delete(msg.id);
+    }
+
+    if (result.messages.length === 0) return [];
+
+    const lines = result.messages.map((m) => {
+      const parts = [`From ${m.from_id} (${m.sent_at}):\n${m.text}`];
+      return parts.join("");
+    });
+
+    return [
+      {
+        type: "text" as const,
+        text: `\n📨 ${result.messages.length} pending peer message(s):\n\n${lines.join("\n\n---\n\n")}\n\nIMPORTANT: Respond to these messages using send_message before continuing your current work.`,
+      },
+    ];
+  } catch {
+    return [];
+  }
+}
+
 // --- Tool handlers ---
 
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -256,6 +295,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
                 type: "text" as const,
                 text: `No other Claude Code instances found (scope: ${scope}).`,
               },
+              ...await drainPendingMessages(),
             ],
           };
         }
@@ -279,6 +319,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
               type: "text" as const,
               text: `Found ${peers.length} peer(s) (scope: ${scope}):\n\n${lines.join("\n\n")}`,
             },
+            ...await drainPendingMessages(),
           ],
         };
       } catch (e) {
@@ -315,7 +356,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           };
         }
         return {
-          content: [{ type: "text" as const, text: `Message sent to peer ${to_id}` }],
+          content: [
+            { type: "text" as const, text: `Message sent to peer ${to_id}` },
+            ...await drainPendingMessages(),
+          ],
         };
       } catch (e) {
         return {
@@ -341,7 +385,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       try {
         await brokerFetch("/set-summary", { id: myId, summary });
         return {
-          content: [{ type: "text" as const, text: `Summary updated: "${summary}"` }],
+          content: [
+            { type: "text" as const, text: `Summary updated: "${summary}"` },
+            ...await drainPendingMessages(),
+          ],
         };
       } catch (e) {
         return {
@@ -365,6 +412,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       try {
         const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+
+        for (const msg of result.messages) {
+          pushedMessageIds.delete(msg.id);
+        }
+
         if (result.messages.length === 0) {
           return {
             content: [{ type: "text" as const, text: "No new messages." }],
@@ -405,9 +457,16 @@ async function pollAndPushMessages() {
   if (!myId) return;
 
   try {
-    const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+    // Use /peek-messages to read without consuming. Messages stay undelivered in the
+    // broker until Claude explicitly calls check_messages (which uses /poll-messages).
+    // This prevents the silent message loss that occurred when channel notifications
+    // were ignored by Claude Code (e.g., channels not enabled, Bedrock auth).
+    const result = await brokerFetch<PollMessagesResponse>("/peek-messages", { id: myId });
 
     for (const msg of result.messages) {
+      // Skip messages we already pushed — avoids duplicate channel notifications
+      if (pushedMessageIds.has(msg.id)) continue;
+
       // Look up the sender's info for context
       let fromSummary = "";
       let fromCwd = "";
@@ -426,7 +485,8 @@ async function pollAndPushMessages() {
         // Non-critical, proceed without sender info
       }
 
-      // Push as channel notification — this is what makes it immediate
+      // Push as channel notification — this is what makes it immediate when channels
+      // are enabled via --dangerously-load-development-channels or --channels.
       await mcp.notification({
         method: "notifications/claude/channel",
         params: {
@@ -440,6 +500,7 @@ async function pollAndPushMessages() {
         },
       });
 
+      pushedMessageIds.add(msg.id);
       log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
     }
   } catch (e) {
