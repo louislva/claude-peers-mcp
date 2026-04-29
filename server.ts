@@ -363,35 +363,24 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           isError: true,
         };
       }
-      try {
-        const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
-        if (result.messages.length === 0) {
-          return {
-            content: [{ type: "text" as const, text: "No new messages." }],
-          };
-        }
-        const lines = result.messages.map(
-          (m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`
-        );
+      // Drain the buffer populated by the polling loop
+      if (pendingMessages.length === 0) {
         return {
-          content: [
-            {
-              type: "text" as const,
-              text: `${result.messages.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`,
-            },
-          ],
-        };
-      } catch (e) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Error checking messages: ${e instanceof Error ? e.message : String(e)}`,
-            },
-          ],
-          isError: true,
+          content: [{ type: "text" as const, text: "No new messages." }],
         };
       }
+      const msgs = pendingMessages.splice(0, pendingMessages.length);
+      const lines = msgs.map(
+        (m) => `From ${m.from_id}${m.from_summary ? ` (${m.from_summary})` : ""} (${m.sent_at}):\n${m.text}`
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `${msgs.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`,
+          },
+        ],
+      };
     }
 
     default:
@@ -400,6 +389,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 });
 
 // --- Polling loop for inbound messages ---
+
+// Buffer for messages consumed by the poll loop — check_messages reads from here
+const pendingMessages: Array<Message & { from_summary?: string; from_cwd?: string }> = [];
 
 async function pollAndPushMessages() {
   if (!myId) return;
@@ -426,21 +418,27 @@ async function pollAndPushMessages() {
         // Non-critical, proceed without sender info
       }
 
-      // Push as channel notification — this is what makes it immediate
-      await mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content: msg.text,
-          meta: {
-            from_id: msg.from_id,
-            from_summary: fromSummary,
-            from_cwd: fromCwd,
-            sent_at: msg.sent_at,
+      // Try channel notification (works when --dangerously-load-development-channels is set)
+      try {
+        await mcp.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: msg.text,
+            meta: {
+              from_id: msg.from_id,
+              from_summary: fromSummary,
+              from_cwd: fromCwd,
+              sent_at: msg.sent_at,
+            },
           },
-        },
-      });
+        });
+        log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+      } catch {
+        log(`Buffered message from ${msg.from_id} (channel push unavailable)`);
+      }
 
-      log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+      // Always buffer — check_messages drains this
+      pendingMessages.push({ ...msg, from_summary: fromSummary, from_cwd: fromCwd });
     }
   } catch (e) {
     // Broker might be down temporarily, don't crash
