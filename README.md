@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/louislva-claude-peers-mcp-badge.png)](https://mseep.ai/app/louislva-claude-peers-mcp)
+
 # claude-peers
 
 Let your Claude Code instances find each other and talk. When you're running 5 sessions across different projects, any Claude can discover the others and send messages that arrive instantly.
