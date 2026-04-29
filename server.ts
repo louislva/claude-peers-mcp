@@ -152,7 +152,7 @@ const mcp = new Server(
 
 IMPORTANT: When you receive a <channel source="claude-peers" ...> message, RESPOND IMMEDIATELY. Do not wait until your current task is finished. Pause what you are doing, reply to the message using send_message, then resume your work. Treat incoming peer messages like a coworker tapping you on the shoulder — answer right away, even if you're in the middle of something.
 
-Read the from_id, from_summary, and from_cwd attributes to understand who sent the message. Reply by calling send_message with their from_id.
+Read the from_id, from_summary, and from_cwd attributes to understand who sent the message. Reply by calling send_message with to set to their from_id.
 
 Available tools:
 - list_peers: Discover other Claude Code instances (scope: machine/directory/repo)
@@ -191,16 +191,20 @@ const TOOLS = [
     inputSchema: {
       type: "object" as const,
       properties: {
-        to_id: {
+        to: {
           type: "string" as const,
           description: "The peer ID of the target Claude Code instance (from list_peers)",
+        },
+        to_id: {
+          type: "string" as const,
+          description: "Alias for 'to' (deprecated, use 'to' instead)",
         },
         message: {
           type: "string" as const,
           description: "The message to send",
         },
       },
-      required: ["to_id", "message"],
+      required: ["to", "message"],
     },
   },
   {
@@ -295,7 +299,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     case "send_message": {
-      const { to_id, message } = args as { to_id: string; message: string };
+      const { to, to_id: toIdLegacy, message } = args as { to?: string; to_id?: string; message: string };
+      const to_id = to ?? toIdLegacy;
       if (!myId) {
         return {
           content: [{ type: "text" as const, text: "Not registered with broker yet" }],
