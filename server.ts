@@ -38,7 +38,11 @@ const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
-const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
+const BROKER_SCRIPT = (() => {
+  const raw = new URL("./broker.ts", import.meta.url).pathname;
+  // On Windows, URL.pathname produces "/C:/..." — strip the leading slash
+  return process.platform === "win32" && raw.match(/^\/[A-Za-z]:/) ? raw.slice(1) : raw;
+})();
 
 // --- Broker communication ---
 
@@ -71,7 +75,7 @@ async function ensureBroker(): Promise<void> {
   }
 
   log("Starting broker daemon...");
-  const proc = Bun.spawn(["bun", BROKER_SCRIPT], {
+  const proc = Bun.spawn([process.execPath, BROKER_SCRIPT], {
     stdio: ["ignore", "ignore", "inherit"],
     // Detach so the broker survives if this MCP server exits
     // On macOS/Linux, the broker will keep running
@@ -117,8 +121,9 @@ async function getGitRoot(cwd: string): Promise<string | null> {
 }
 
 function getTty(): string | null {
+  // ps command is Unix-only; skip on Windows
+  if (process.platform === "win32") return null;
   try {
-    // Try to get the parent's tty from the process tree
     const ppid = process.ppid;
     if (ppid) {
       const proc = Bun.spawnSync(["ps", "-o", "tty=", "-p", String(ppid)]);
@@ -451,10 +456,15 @@ async function pollAndPushMessages() {
 // --- Startup ---
 
 async function main() {
-  // 1. Ensure broker is running
+  // 1. Connect MCP over stdio FIRST — Claude Code needs the handshake before anything else
+  const transport = new StdioServerTransport();
+  await mcp.connect(transport);
+  log("MCP connected");
+
+  // 2. Ensure broker is running (now safe to take time — MCP handshake is done)
   await ensureBroker();
 
-  // 2. Gather context
+  // 3. Gather context
   myCwd = process.cwd();
   myGitRoot = await getGitRoot(myCwd);
   const tty = getTty();
@@ -463,7 +473,7 @@ async function main() {
   log(`Git root: ${myGitRoot ?? "(none)"}`);
   log(`TTY: ${tty ?? "(unknown)"}`);
 
-  // 3. Generate initial summary via gpt-5.4-nano (non-blocking, best-effort)
+  // 4. Generate initial summary via gpt-5.4-nano (non-blocking, best-effort)
   let initialSummary = "";
   const summaryPromise = (async () => {
     try {
@@ -487,7 +497,7 @@ async function main() {
   // Wait briefly for summary, but don't block startup
   await Promise.race([summaryPromise, new Promise((r) => setTimeout(r, 3000))]);
 
-  // 4. Register with broker
+  // 5. Register with broker
   const reg = await brokerFetch<RegisterResponse>("/register", {
     pid: process.pid,
     cwd: myCwd,
@@ -511,10 +521,6 @@ async function main() {
       }
     });
   }
-
-  // 5. Connect MCP over stdio
-  await mcp.connect(new StdioServerTransport());
-  log("MCP connected");
 
   // 6. Start polling for inbound messages
   const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
