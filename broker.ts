@@ -10,6 +10,7 @@
  */
 
 import { Database } from "bun:sqlite";
+import { uniqueNamesGenerator, adjectives, animals } from "unique-names-generator";
 import type {
   RegisterRequest,
   RegisterResponse,
@@ -101,6 +102,10 @@ const selectAllPeers = db.prepare(`
   SELECT * FROM peers
 `);
 
+const selectPeerById = db.prepare(`
+  SELECT id FROM peers WHERE id = ?
+`);
+
 const selectPeersByDirectory = db.prepare(`
   SELECT * FROM peers WHERE cwd = ?
 `);
@@ -125,12 +130,22 @@ const markDelivered = db.prepare(`
 // --- Generate peer ID ---
 
 function generateId(): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let id = "";
-  for (let i = 0; i < 8; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 32; i++) {
+    const id = uniqueNamesGenerator({
+      dictionaries: [adjectives, adjectives, animals],
+      separator: "-",
+      style: "lowerCase",
+    });
+    const existing = selectPeerById.get(id) as { id: string } | null;
+    if (!existing) return id;
   }
-  return id;
+
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `${uniqueNamesGenerator({
+    dictionaries: [adjectives, animals],
+    separator: "-",
+    style: "lowerCase",
+  })}-${suffix}`;
 }
 
 // --- Request handlers ---

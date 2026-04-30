@@ -53,7 +53,7 @@ In another terminal, start Claude Code the same way. Then ask either one:
 
 > List all peers on this machine
 
-It'll show every running instance with their working directory, git repo, and a summary of what they're doing. Then:
+It'll show every running instance with their working directory, git repo, summary, and a readable ID like `ancient-brave-otter`. Then:
 
 > Send a message to peer [id]: "what are you working on?"
 
