@@ -70,6 +70,15 @@ if (!messagesCols.some((c) => c.name === "pushed")) {
   db.run("ALTER TABLE messages ADD COLUMN pushed INTEGER NOT NULL DEFAULT 0");
 }
 
+// Idempotent migration: add 'expired_at' column for per-message TTL.
+// A periodic sweep marks expired_at on rows older than CLAUDE_PEERS_TTL_HOURS
+// (default 24h) and delivered=0. We do NOT mark delivered=1 on expired rows
+// because that would falsify the consumption signal — the audit trail must
+// distinguish "model consumed it" from "broker stopped trying after TTL".
+if (!messagesCols.some((c) => c.name === "expired_at")) {
+  db.run("ALTER TABLE messages ADD COLUMN expired_at TEXT DEFAULT NULL");
+}
+
 // Clean up stale peers (PIDs that no longer exist) on startup
 function cleanStalePeers() {
   const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
@@ -89,6 +98,22 @@ cleanStalePeers();
 
 // Periodically clean stale peers (every 30s)
 setInterval(cleanStalePeers, 30_000);
+
+// TTL sweep: mark expired_at on undelivered messages older than
+// CLAUDE_PEERS_TTL_HOURS (default 24h). Set the env var to "0" to disable.
+const TTL_HOURS = parseInt(process.env.CLAUDE_PEERS_TTL_HOURS ?? "24", 10);
+
+function expireOldMessages() {
+  if (TTL_HOURS <= 0) return;
+  const cutoff = new Date(Date.now() - TTL_HOURS * 3600 * 1000).toISOString();
+  db.run(
+    "UPDATE messages SET expired_at = ? WHERE delivered = 0 AND expired_at IS NULL AND sent_at < ?",
+    [new Date().toISOString(), cutoff],
+  );
+}
+
+expireOldMessages();
+setInterval(expireOldMessages, 5 * 60 * 1000); // every 5 min
 
 // --- Prepared statements ---
 
@@ -127,13 +152,13 @@ const insertMessage = db.prepare(`
 `);
 
 const selectUndelivered = db.prepare(`
-  SELECT * FROM messages WHERE to_id = ? AND delivered = 0 ORDER BY sent_at ASC
+  SELECT * FROM messages WHERE to_id = ? AND delivered = 0 AND expired_at IS NULL ORDER BY sent_at ASC
 `);
 
 // Auto-push loop reads via selectUnpushed; check_messages tool (manual
 // fallback) reads via selectUndelivered. Two flags, two consumers.
 const selectUnpushed = db.prepare(`
-  SELECT * FROM messages WHERE to_id = ? AND pushed = 0 AND delivered = 0 ORDER BY sent_at ASC
+  SELECT * FROM messages WHERE to_id = ? AND pushed = 0 AND delivered = 0 AND expired_at IS NULL ORDER BY sent_at ASC
 `);
 
 const markDelivered = db.prepare(`
