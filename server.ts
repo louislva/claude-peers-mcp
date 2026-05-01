@@ -405,7 +405,11 @@ async function pollAndPushMessages() {
   if (!myId) return;
 
   try {
-    const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+    // Use /push-poll-messages so this auto-push consumer marks pushed=1
+    // (not delivered=1). The manual check_messages tool still uses
+    // /poll-messages and continues to mark delivered=1 — that's the
+    // canonical "model consumed" signal. Two endpoints, two flags.
+    const result = await brokerFetch<PollMessagesResponse>("/push-poll-messages", { id: myId });
 
     for (const msg of result.messages) {
       // Look up the sender's info for context
