@@ -515,15 +515,28 @@ async function main() {
 
   // 5. Connect MCP. After handshake, record on the broker whether the client
   //    advertised experimental["claude/channel"] so list_peers can surface it.
+  //    The post is retried on the next heartbeat tick if the initial attempt
+  //    fails — otherwise a momentarily-unreachable broker would leave this
+  //    peer's channel_loaded stuck at the registered default for its lifetime.
   const CHANNEL_CAPABILITY_KEY = "claude/channel";
+  let pendingChannelCapability: boolean | null = null;
+
+  async function postCapability(value: boolean): Promise<void> {
+    if (!myId) return;
+    try {
+      await brokerFetch("/set-capability", { id: myId, channel_loaded: value });
+      pendingChannelCapability = null;
+    } catch (e) {
+      pendingChannelCapability = value;
+      log(`Failed to set capability (will retry on heartbeat): ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   mcp.oninitialized = () => {
     const caps = mcp.getClientCapabilities();
     const channelLoaded = Boolean(caps?.experimental?.[CHANNEL_CAPABILITY_KEY]);
     log(`Client channel capability: ${channelLoaded ? "loaded" : "not loaded"}`);
-    if (!myId) return;
-    brokerFetch("/set-capability", { id: myId, channel_loaded: channelLoaded }).catch(
-      (e) => log(`Failed to set capability: ${e instanceof Error ? e.message : String(e)}`)
-    );
+    void postCapability(channelLoaded);
   };
 
   await mcp.connect(new StdioServerTransport());
@@ -532,13 +545,16 @@ async function main() {
   // 6. Start polling for inbound messages
   const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
 
-  // 7. Start heartbeat
+  // 7. Start heartbeat (also drains a deferred capability post if one is pending)
   const heartbeatTimer = setInterval(async () => {
     if (myId) {
       try {
         await brokerFetch("/heartbeat", { id: myId });
       } catch {
         // Non-critical
+      }
+      if (pendingChannelCapability !== null) {
+        await postCapability(pendingChannelCapability);
       }
     }
   }, HEARTBEAT_INTERVAL_MS);

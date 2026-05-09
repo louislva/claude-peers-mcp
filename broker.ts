@@ -204,7 +204,7 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
   }
 
   // Verify each peer's process is still alive
-  return peers.filter((p) => {
+  const alive = peers.filter((p) => {
     try {
       process.kill(p.pid, 0);
       return true;
@@ -214,6 +214,8 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
       return false;
     }
   });
+  // SQLite returns INTEGER 0/1; coerce to boolean at the API boundary.
+  return alive.map((p) => ({ ...p, channel_loaded: Boolean(p.channel_loaded) }));
 }
 
 function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: string } {

@@ -10,7 +10,7 @@ export interface Peer {
   summary: string;
   registered_at: string; // ISO timestamp
   last_seen: string; // ISO timestamp
-  channel_loaded: 0 | 1;
+  channel_loaded: boolean;
 }
 
 export interface Message {
