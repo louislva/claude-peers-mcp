@@ -10,9 +10,6 @@ export interface Peer {
   summary: string;
   registered_at: string; // ISO timestamp
   last_seen: string; // ISO timestamp
-  // 1 if the connected MCP client advertised experimental["claude/channel"]
-  // (i.e. messages can be pushed proactively into its session). 0 otherwise:
-  // such peers will only consume messages via an explicit check_messages call.
   channel_loaded: 0 | 1;
 }
 

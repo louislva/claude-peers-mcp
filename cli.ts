@@ -11,8 +11,12 @@
  *   bun cli.ts kill-broker     — Stop the broker daemon
  */
 
+import type { Peer } from "./shared/types.ts";
+
 const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
+
+const channelLabel = (p: Peer) => (p.channel_loaded ? "channel" : "no-channel");
 
 async function brokerFetch<T>(path: string, body?: unknown): Promise<T> {
   const opts: RequestInit = body
@@ -42,18 +46,7 @@ switch (cmd) {
       console.log(`URL: ${BROKER_URL}`);
 
       if (health.peers > 0) {
-        const peers = await brokerFetch<
-          Array<{
-            id: string;
-            pid: number;
-            cwd: string;
-            git_root: string | null;
-            tty: string | null;
-            summary: string;
-            last_seen: string;
-            channel_loaded: 0 | 1;
-          }>
-        >("/list-peers", {
+        const peers = await brokerFetch<Peer[]>("/list-peers", {
           scope: "machine",
           cwd: "/",
           git_root: null,
@@ -61,8 +54,7 @@ switch (cmd) {
 
         console.log("\nPeers:");
         for (const p of peers) {
-          const channel = p.channel_loaded ? "channel" : "no-channel";
-          console.log(`  ${p.id}  PID:${p.pid}  [${channel}]  ${p.cwd}`);
+          console.log(`  ${p.id}  PID:${p.pid}  [${channelLabel(p)}]  ${p.cwd}`);
           if (p.summary) console.log(`         ${p.summary}`);
           if (p.tty) console.log(`         TTY: ${p.tty}`);
           console.log(`         Last seen: ${p.last_seen}`);
@@ -76,18 +68,7 @@ switch (cmd) {
 
   case "peers": {
     try {
-      const peers = await brokerFetch<
-        Array<{
-          id: string;
-          pid: number;
-          cwd: string;
-          git_root: string | null;
-          tty: string | null;
-          summary: string;
-          last_seen: string;
-          channel_loaded: 0 | 1;
-        }>
-      >("/list-peers", {
+      const peers = await brokerFetch<Peer[]>("/list-peers", {
         scope: "machine",
         cwd: "/",
         git_root: null,
@@ -97,8 +78,7 @@ switch (cmd) {
         console.log("No peers registered.");
       } else {
         for (const p of peers) {
-          const channel = p.channel_loaded ? "channel" : "no-channel";
-          const parts = [`${p.id}  PID:${p.pid}  [${channel}]  ${p.cwd}`];
+          const parts = [`${p.id}  PID:${p.pid}  [${channelLabel(p)}]  ${p.cwd}`];
           if (p.summary) parts.push(`  Summary: ${p.summary}`);
           console.log(parts.join("\n"));
         }

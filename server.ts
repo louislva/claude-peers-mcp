@@ -513,13 +513,12 @@ async function main() {
     });
   }
 
-  // 5. Connect MCP over stdio. After capability negotiation, record on the
-  //    broker whether this client advertises experimental["claude/channel"]
-  //    so other peers can tell at list_peers time whether messages will be
-  //    pushed proactively into this session or only consumed via check_messages.
+  // 5. Connect MCP. After handshake, record on the broker whether the client
+  //    advertised experimental["claude/channel"] so list_peers can surface it.
+  const CHANNEL_CAPABILITY_KEY = "claude/channel";
   mcp.oninitialized = () => {
     const caps = mcp.getClientCapabilities();
-    const channelLoaded = Boolean(caps?.experimental?.["claude/channel"]);
+    const channelLoaded = Boolean(caps?.experimental?.[CHANNEL_CAPABILITY_KEY]);
     log(`Client channel capability: ${channelLoaded ? "loaded" : "not loaded"}`);
     if (!myId) return;
     brokerFetch("/set-capability", { id: myId, channel_loaded: channelLoaded }).catch(
