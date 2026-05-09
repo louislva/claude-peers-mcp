@@ -51,6 +51,7 @@ switch (cmd) {
             tty: string | null;
             summary: string;
             last_seen: string;
+            channel_loaded: 0 | 1;
           }>
         >("/list-peers", {
           scope: "machine",
@@ -60,7 +61,8 @@ switch (cmd) {
 
         console.log("\nPeers:");
         for (const p of peers) {
-          console.log(`  ${p.id}  PID:${p.pid}  ${p.cwd}`);
+          const channel = p.channel_loaded ? "channel" : "no-channel";
+          console.log(`  ${p.id}  PID:${p.pid}  [${channel}]  ${p.cwd}`);
           if (p.summary) console.log(`         ${p.summary}`);
           if (p.tty) console.log(`         TTY: ${p.tty}`);
           console.log(`         Last seen: ${p.last_seen}`);
@@ -83,6 +85,7 @@ switch (cmd) {
           tty: string | null;
           summary: string;
           last_seen: string;
+          channel_loaded: 0 | 1;
         }>
       >("/list-peers", {
         scope: "machine",
@@ -94,7 +97,8 @@ switch (cmd) {
         console.log("No peers registered.");
       } else {
         for (const p of peers) {
-          const parts = [`${p.id}  PID:${p.pid}  ${p.cwd}`];
+          const channel = p.channel_loaded ? "channel" : "no-channel";
+          const parts = [`${p.id}  PID:${p.pid}  [${channel}]  ${p.cwd}`];
           if (p.summary) parts.push(`  Summary: ${p.summary}`);
           console.log(parts.join("\n"));
         }

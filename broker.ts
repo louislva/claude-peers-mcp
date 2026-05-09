@@ -15,6 +15,7 @@ import type {
   RegisterResponse,
   HeartbeatRequest,
   SetSummaryRequest,
+  SetCapabilityRequest,
   ListPeersRequest,
   SendMessageRequest,
   PollMessagesRequest,
@@ -41,9 +42,19 @@ db.run(`
     tty TEXT,
     summary TEXT NOT NULL DEFAULT '',
     registered_at TEXT NOT NULL,
-    last_seen TEXT NOT NULL
+    last_seen TEXT NOT NULL,
+    channel_loaded INTEGER NOT NULL DEFAULT 0
   )
 `);
+
+// Migration: pre-existing DBs may not have channel_loaded yet.
+// bun:sqlite has no ADD COLUMN IF NOT EXISTS, so check via PRAGMA first.
+{
+  const peerCols = db.query("PRAGMA table_info(peers)").all() as { name: string }[];
+  if (!peerCols.some((c) => c.name === "channel_loaded")) {
+    db.run("ALTER TABLE peers ADD COLUMN channel_loaded INTEGER NOT NULL DEFAULT 0");
+  }
+}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS messages (
@@ -91,6 +102,10 @@ const updateLastSeen = db.prepare(`
 
 const updateSummary = db.prepare(`
   UPDATE peers SET summary = ? WHERE id = ?
+`);
+
+const updateChannelLoaded = db.prepare(`
+  UPDATE peers SET channel_loaded = ? WHERE id = ?
 `);
 
 const deletePeer = db.prepare(`
@@ -155,6 +170,10 @@ function handleHeartbeat(body: HeartbeatRequest): void {
 
 function handleSetSummary(body: SetSummaryRequest): void {
   updateSummary.run(body.summary, body.id);
+}
+
+function handleSetCapability(body: SetCapabilityRequest): void {
+  updateChannelLoaded.run(body.channel_loaded ? 1 : 0, body.id);
 }
 
 function handleListPeers(body: ListPeersRequest): Peer[] {
@@ -250,6 +269,9 @@ Bun.serve({
           return Response.json({ ok: true });
         case "/set-summary":
           handleSetSummary(body as SetSummaryRequest);
+          return Response.json({ ok: true });
+        case "/set-capability":
+          handleSetCapability(body as SetCapabilityRequest);
           return Response.json({ ok: true });
         case "/list-peers":
           return Response.json(handleListPeers(body as ListPeersRequest));

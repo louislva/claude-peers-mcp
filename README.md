@@ -68,6 +68,8 @@ The other Claude receives it immediately and responds.
 | `set_summary`    | Describe what you're working on (visible to other peers)                       |
 | `check_messages` | Manually check for messages (fallback if not using channel mode)               |
 
+Each peer record exposes a `channel_loaded` flag — shown as `Channel: yes/no` in `list_peers` output, and as `[channel]` / `[no-channel]` in the CLI. Peers without channel support (e.g. sessions started without `--dangerously-load-development-channels`) cannot receive proactive push notifications; messages sit queued until they call `check_messages` explicitly. Use this signal to avoid routing work to unreachable peers.
+
 ## How it works
 
 A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code session spawns an MCP server that registers with the broker and polls for messages every second. Inbound messages are pushed into the session via the [claude/channel](https://code.claude.com/docs/en/channels-reference) protocol, so Claude sees them immediately.

@@ -269,6 +269,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           if (p.git_root) parts.push(`Repo: ${p.git_root}`);
           if (p.tty) parts.push(`TTY: ${p.tty}`);
           if (p.summary) parts.push(`Summary: ${p.summary}`);
+          parts.push(`Channel: ${p.channel_loaded ? "yes" : "no"}`);
           parts.push(`Last seen: ${p.last_seen}`);
           return parts.join("\n  ");
         });
@@ -512,7 +513,20 @@ async function main() {
     });
   }
 
-  // 5. Connect MCP over stdio
+  // 5. Connect MCP over stdio. After capability negotiation, record on the
+  //    broker whether this client advertises experimental["claude/channel"]
+  //    so other peers can tell at list_peers time whether messages will be
+  //    pushed proactively into this session or only consumed via check_messages.
+  mcp.oninitialized = () => {
+    const caps = mcp.getClientCapabilities();
+    const channelLoaded = Boolean(caps?.experimental?.["claude/channel"]);
+    log(`Client channel capability: ${channelLoaded ? "loaded" : "not loaded"}`);
+    if (!myId) return;
+    brokerFetch("/set-capability", { id: myId, channel_loaded: channelLoaded }).catch(
+      (e) => log(`Failed to set capability: ${e instanceof Error ? e.message : String(e)}`)
+    );
+  };
+
   await mcp.connect(new StdioServerTransport());
   log("MCP connected");
 
