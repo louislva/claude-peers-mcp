@@ -118,18 +118,24 @@ async function main() {
   });
 
   // Handshake first
-  const writer = proc.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(handshake));
+  // proc.stdin is a Bun FileSink (not a WritableStream) -- use .write()/.end() directly.
+  await proc.stdin.write(new TextEncoder().encode(handshake));
 
   // Forward stdin -> ssh stdin
-  // Pipe Node Readable (process.stdin) into the Bun WritableStreamDefaultWriter.
   process.stdin.on("data", (chunk: Buffer) => {
-    writer.write(new Uint8Array(chunk)).catch(() => {
+    try {
+      const result = proc.stdin.write(new Uint8Array(chunk));
+      if (result instanceof Promise) result.catch(() => {});
+    } catch {
       // Pipe broken; will be handled when proc exits
-    });
+    }
   });
   process.stdin.on("end", () => {
-    writer.close().catch(() => {});
+    try {
+      proc.stdin.end();
+    } catch {
+      // ignore
+    }
   });
 
   // Forward ssh stdout -> our stdout
