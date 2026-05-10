@@ -1,6 +1,6 @@
 {
   "name": "claude-peers",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Peer discovery and messaging for Claude Code instances",
   "module": "index.ts",
   "type": "module",

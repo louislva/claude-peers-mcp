@@ -11,8 +11,12 @@
  * Settings file is JSON, all keys optional. See README for full schema.
  */
 
-import { join } from "node:path";
+import { join, dirname, sep } from "node:path";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+
+import type { GroupId } from "./types.ts";
 
 export type SummaryProvider = "auto" | "anthropic" | "openai-compat" | "none";
 
@@ -35,6 +39,10 @@ export interface Config {
   summary_api_key: string | null;
   /** Model name passed to the summary provider. */
   summary_model: string;
+  /** v0.3 -- map of logical group name -> group secret. Empty means no groups configured. */
+  groups: Record<string, string>;
+  /** v0.3 -- default group name to use when no project file overrides. null means fall through to env then 'default' sentinel. */
+  default_group: string | null;
 }
 
 interface FileConfig {
@@ -49,6 +57,8 @@ interface FileConfig {
   summary_model?: string;
   // Backward-compat alias for summary_model when provider is anthropic.
   anthropic_model?: string;
+  groups?: Record<string, string>;
+  default_group?: string;
 }
 
 const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
@@ -154,6 +164,9 @@ export async function loadConfig(): Promise<Config> {
     fileCfg.anthropic_model ??
     DEFAULT_ANTHROPIC_MODEL;
 
+  const groups: Record<string, string> = fileCfg.groups ?? {};
+  const default_group = fileCfg.default_group ?? null;
+
   return {
     port,
     db,
@@ -164,6 +177,8 @@ export async function loadConfig(): Promise<Config> {
     summary_base_url,
     summary_api_key,
     summary_model,
+    groups,
+    default_group,
   };
 }
 
@@ -187,4 +202,155 @@ export function resolveProvider(config: Config): Exclude<SummaryProvider, "auto"
  */
 export function brokerUrl(config: Config): string {
   return `http://127.0.0.1:${config.port}`;
+}
+
+// --- v0.3: group resolution ---
+
+const PROJECT_FILE = ".claude-peers.json";
+const PROJECT_LOCAL_FILE = ".claude-peers.local.json";
+
+/**
+ * Read a project file (.claude-peers.json or .local.json) and return the validated `group` field.
+ * Returns null if the file doesn't exist, is malformed, or has no `group` field.
+ * Logs a warning on stderr if the file contains unknown fields (rejects them but keeps `group`).
+ */
+function readProjectFile(path: string): string | null {
+  try {
+    if (!existsSync(path)) return null;
+    const raw = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null) {
+      console.error(`[claude-peers] ${path}: expected JSON object, ignoring`);
+      return null;
+    }
+    const obj = parsed as Record<string, unknown>;
+    const allowedKeys = new Set(["group"]);
+    for (const key of Object.keys(obj)) {
+      if (!allowedKeys.has(key)) {
+        console.error(`[claude-peers] ${path}: unknown field '${key}' (only 'group' is allowed), ignoring`);
+      }
+    }
+    const group = obj.group;
+    if (typeof group !== "string" || group.length === 0) return null;
+    return group;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[claude-peers] failed to read ${path}: ${msg}`);
+    return null;
+  }
+}
+
+/**
+ * Walk upwards from `start` to find a file named `filename`, stopping at the boundary
+ * (`gitRoot` parent if provided, otherwise filesystem root). Returns the path or null.
+ */
+function findUpwards(start: string, filename: string, gitRoot: string | null): string | null {
+  let current = start;
+  let prev: string | null = null;
+  const stopAt = gitRoot ? dirname(gitRoot) : null;
+  while (current !== prev) {
+    const candidate = join(current, filename);
+    if (existsSync(candidate)) return candidate;
+    if (stopAt !== null && current === gitRoot) {
+      // Walked up to git_root; check it then stop.
+      return null;
+    }
+    prev = current;
+    current = dirname(current);
+    // dirname of root returns the same path, terminating the loop.
+    if (stopAt !== null && current === stopAt) {
+      // Don't walk above git_root's parent.
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve the effective group name for a given cwd.
+ * Order (first wins):
+ *   1. .claude-peers.local.json (walking up to git_root)
+ *   2. .claude-peers.json       (walking up to git_root)
+ *   3. user config `default_group`
+ *   4. env var CLAUDE_PEERS_GROUP
+ *   5. sentinel 'default'
+ */
+export function resolveGroupName(
+  cwd: string,
+  gitRoot: string | null,
+  userConfig: Pick<Config, "default_group">
+): string {
+  const localFile = findUpwards(cwd, PROJECT_LOCAL_FILE, gitRoot);
+  if (localFile) {
+    const name = readProjectFile(localFile);
+    if (name) return name;
+  }
+  const projectFile = findUpwards(cwd, PROJECT_FILE, gitRoot);
+  if (projectFile) {
+    const name = readProjectFile(projectFile);
+    if (name) return name;
+  }
+  if (userConfig.default_group) return userConfig.default_group;
+  const envGroup = process.env.CLAUDE_PEERS_GROUP;
+  if (envGroup && envGroup.length > 0) return envGroup;
+  return "default";
+}
+
+/**
+ * Look up a group secret by name in the user config. Returns null if the name
+ * is the literal sentinel 'default', or if the name is not defined in the dictionary.
+ * Logs a warning on stderr in the latter case so the user understands the fallback.
+ */
+export function resolveGroupSecret(
+  name: string,
+  userConfig: Pick<Config, "groups">
+): string | null {
+  if (name === "default") return null;
+  const secret = userConfig.groups[name];
+  if (typeof secret === "string" && secret.length > 0) return secret;
+  console.error(
+    `[claude-peers] group '${name}' resolved but no secret defined in user config; falling back to 'default'`
+  );
+  return null;
+}
+
+/**
+ * Compute the group_id from a secret. The 'default' sentinel returns 'default'.
+ * Otherwise: sha256(secret) hex, truncated to 32 chars (matches the spec section 4.5).
+ */
+export function computeGroupId(secret: string | null): GroupId {
+  if (secret === null) return "default";
+  return createHash("sha256").update(secret, "utf-8").digest("hex").slice(0, 32);
+}
+
+/**
+ * Compute the full sha256 hex of a secret, used by the broker for TOFU validation.
+ * null secret -> null (the 'default' group has secret_hash NULL in SQL).
+ */
+export function computeGroupSecretHash(secret: string | null): string | null {
+  if (secret === null) return null;
+  return createHash("sha256").update(secret, "utf-8").digest("hex");
+}
+
+/**
+ * One-shot helper: resolve the group from cwd/gitRoot and produce all artefacts
+ * needed for the handshake.
+ */
+export function resolveGroup(
+  cwd: string,
+  gitRoot: string | null,
+  userConfig: Pick<Config, "groups" | "default_group">
+): { name: string; group_id: GroupId; group_secret_hash: string | null; groups_map: Record<string, GroupId> } {
+  const name = resolveGroupName(cwd, gitRoot, userConfig);
+  const secret = resolveGroupSecret(name, userConfig);
+  const group_id = computeGroupId(secret);
+  const group_secret_hash = computeGroupSecretHash(secret);
+
+  // Build the public name -> group_id map (no secrets) for server.ts inversion.
+  const groups_map: Record<string, GroupId> = { default: "default" };
+  for (const [n, s] of Object.entries(userConfig.groups)) {
+    groups_map[n] = computeGroupId(s);
+  }
+
+  return { name, group_id, group_secret_hash, groups_map };
 }

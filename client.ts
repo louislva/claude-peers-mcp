@@ -17,7 +17,7 @@
  */
 
 import { hostname } from "node:os";
-import { loadConfig } from "./shared/config.ts";
+import { loadConfig, resolveGroup } from "./shared/config.ts";
 import {
   getGitBranch,
   getRecentFiles,
@@ -76,6 +76,14 @@ async function main() {
     computeProjectKey(cwd),
   ]);
 
+  // v0.3: resolve the group locally; the secret never leaves this PC.
+  const { name: groupName, group_id, group_secret_hash, groups_map } = resolveGroup(
+    cwd,
+    git_root,
+    config
+  );
+  log(`Group: ${groupName} (id: ${group_id.slice(0, 8)})`);
+
   const meta: ClientMeta = {
     host: hostname(),
     client_pid: process.pid,
@@ -85,6 +93,9 @@ async function main() {
     recent_files,
     project_key,
     tty: null,
+    group_id,
+    group_secret_hash,
+    groups_map,
   };
 
   const handshake = JSON.stringify({ client_meta: meta }) + "\n";

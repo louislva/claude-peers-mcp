@@ -39,3 +39,7 @@ findings.md
 progress.md
 progress-archive.md
 .planning/
+
+# Claude Code local-only files (personal, not project-wide)
+.claude/session-checkpoint.md
+.claude/settings.local.json
