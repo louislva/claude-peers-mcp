@@ -1044,3 +1044,137 @@ test("/list-waves returns waves with task_count, tasks_completed, tasks_running 
   expect(found!.tasks_completed).toBe(0);
   expect(found!.status).toBe("pending");
 });
+
+// --- /register external_id tests (used by bridges) ---
+
+test("/register with external_id uses it as the peer id", async () => {
+  const res = await brokerPost<{ id: string }>("/register", {
+    pid: process.pid,
+    cwd: "/tmp/extid-happy",
+    git_root: null,
+    tty: null,
+    summary: "telegram bridge",
+    external_id: "telegram-test-happy",
+  });
+  expect(res.id).toBe("telegram-test-happy");
+
+  // Listed back as a normal peer (machine scope returns all peers).
+  const peers = await brokerPost<{ id: string }[]>("/list-peers", {
+    scope: "machine",
+    cwd: "/tmp/extid-happy",
+    git_root: null,
+  });
+  expect(peers.some((p) => p.id === "telegram-test-happy")).toBe(true);
+
+  await brokerPost("/unregister", { id: "telegram-test-happy" });
+});
+
+test("/register with same external_id from a different live PID returns 409", async () => {
+  // First registration: PID = the test process itself, guaranteed alive.
+  const first = await fetch(`${BROKER_URL}/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      pid: process.pid,
+      cwd: "/tmp/extid-collision",
+      git_root: null,
+      tty: null,
+      summary: "bridge-A",
+      external_id: "telegram-test-collision",
+    }),
+  });
+  expect(first.status).toBe(200);
+  const firstBody = (await first.json()) as { id: string };
+  expect(firstBody.id).toBe("telegram-test-collision");
+
+  // Second registration: same external_id, different PID. Existing peer's
+  // PID is alive (it's the test process), so the broker must 409 instead
+  // of overwriting.
+  const second = await fetch(`${BROKER_URL}/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      pid: process.pid + 12345,
+      cwd: "/tmp/extid-collision",
+      git_root: null,
+      tty: null,
+      summary: "bridge-B",
+      external_id: "telegram-test-collision",
+    }),
+  });
+  expect(second.status).toBe(409);
+  const secondBody = (await second.json()) as { error?: string };
+  expect(secondBody.error).toMatch(/already registered/i);
+
+  await brokerPost("/unregister", { id: "telegram-test-collision" });
+});
+
+test("/register rejects malformed external_id with 400", async () => {
+  const cases = ["Capital", "white space", "weird!", "-leading-dash", "_leading-underscore", ""];
+  for (const bad of cases) {
+    const res = await fetch(`${BROKER_URL}/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pid: process.pid,
+        cwd: "/tmp/extid-bad",
+        git_root: null,
+        tty: null,
+        summary: "x",
+        external_id: bad,
+      }),
+    });
+    expect(res.status).toBe(400);
+  }
+});
+
+test("/register without external_id still auto-generates an 8-char id", async () => {
+  const res = await brokerPost<{ id: string }>("/register", {
+    pid: 88801,
+    cwd: "/tmp/extid-autogen",
+    git_root: null,
+    tty: null,
+    summary: "auto",
+  });
+  expect(res.id).toBeString();
+  expect(res.id.length).toBe(8);
+  expect(res.id).not.toMatch(/^telegram/);
+  await brokerPost("/unregister", { id: res.id });
+});
+
+test("/register with external_id and same PID is idempotent (re-registration cleans the old peer)", async () => {
+  // First registration with our PID.
+  const first = await brokerPost<{ id: string }>("/register", {
+    pid: process.pid,
+    cwd: "/tmp/extid-reregister",
+    git_root: null,
+    tty: null,
+    summary: "first",
+  });
+  expect(first.id).toBeString();
+
+  // Re-register the SAME PID with an external_id — registerTxn cleans by PID
+  // and we get the requested id back.
+  const second = await brokerPost<{ id: string }>("/register", {
+    pid: process.pid,
+    cwd: "/tmp/extid-reregister",
+    git_root: null,
+    tty: null,
+    summary: "second",
+    external_id: "telegram-test-reregister",
+  });
+  expect(second.id).toBe("telegram-test-reregister");
+
+  // And re-registering the same external_id with the same PID succeeds.
+  const third = await brokerPost<{ id: string }>("/register", {
+    pid: process.pid,
+    cwd: "/tmp/extid-reregister",
+    git_root: null,
+    tty: null,
+    summary: "third",
+    external_id: "telegram-test-reregister",
+  });
+  expect(third.id).toBe("telegram-test-reregister");
+
+  await brokerPost("/unregister", { id: "telegram-test-reregister" });
+});

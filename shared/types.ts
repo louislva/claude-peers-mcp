@@ -79,6 +79,10 @@ export interface RegisterRequest {
   git_root: string | null;
   tty: string | null;
   summary: string;
+  // Optional stable id requested by the caller (e.g. external bridges
+  // like "telegram"). Must match ^[a-z0-9][a-z0-9_-]*$. Returns 409 if a
+  // peer with this id is already registered to a different live PID.
+  external_id?: string;
 }
 
 export interface RegisterResponse {
