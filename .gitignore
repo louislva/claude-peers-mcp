@@ -32,3 +32,13 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Bridge state and secrets — never commit
+/bridges/*/secrets/*
+!/bridges/*/secrets/.gitignore
+/bridges/*/state.json
+/bridges/*/logs/
+/bridges/*/*.offset
+/bridges/*/*.pid
+.env
+.env.*

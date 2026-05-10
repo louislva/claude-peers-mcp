@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# pre-commit hook: scan staged content for credential-shaped patterns and abort.
+# Installed via bridges/telegram/contrib/install-hooks.sh which sets
+# core.hooksPath = .githooks for this repo.
+set -euo pipefail
+
+patterns=(
+  'bot[0-9]{6,}:[A-Za-z0-9_-]{30,}'              # Telegram bot token shape
+  'TELEGRAM_BOT_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]]+'
+  'TELEGRAM_CHAT_ID[[:space:]]*=[[:space:]]*[0-9]{6,}'
+)
+
+joined=$(IFS='|'; echo "${patterns[*]}")
+hits=$(git diff --cached -U0 | grep -nE "$joined" || true)
+
+if [[ -n "$hits" ]]; then
+  echo "ERROR: staged changes contain a credential-shaped pattern:" >&2
+  echo "$hits" >&2
+  echo "" >&2
+  echo "If this is a false positive, commit with --no-verify (and double-check)." >&2
+  exit 1
+fi
