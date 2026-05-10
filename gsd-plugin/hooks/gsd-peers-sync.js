@@ -16,9 +16,12 @@
 //
 // Config: .planning/config.json → hooks.peers_sync: true (default: false)
 
-const fs = require('fs');
-const path = require('path');
-const http = require('http');
+// Repo's package.json has "type": "module", so node loads this as ESM and
+// CJS `require` is unavailable. Use `node:` ESM imports instead.
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import { execSync } from 'node:child_process';
 
 const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT || '7899', 10);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
@@ -122,7 +125,6 @@ function isBrokerAlive() {
 // Get git root for cwd
 function getGitRoot(cwd) {
   try {
-    const { execSync } = require('child_process');
     return execSync('git rev-parse --show-toplevel', { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
   } catch {
     return null;
