@@ -255,7 +255,11 @@ const selectPeersWithTaskState = db.prepare(`
 // --- Shared cleanup helper (used inside transactions) ---
 
 // Fully clean a peer and all its FK references: messages, task_assignments, sessions, then peer
-function cleanPeerRefs(peerId: string) {
+function cleanPeerRefs(peerId: string, reason?: string) {
+  const msgCount = (db.query("SELECT COUNT(*) as cnt FROM messages WHERE from_id = ? OR to_id = ?").get(peerId, peerId) as { cnt: number }).cnt;
+  if (msgCount > 0) {
+    console.error(`[claude-peers broker] cleaning peer ${peerId}${reason ? ` (${reason})` : ""}: deleting ${msgCount} message(s)`);
+  }
   db.run("DELETE FROM messages WHERE from_id = ? OR to_id = ?", [peerId, peerId]);
   const sessions = db.query("SELECT session_id FROM sessions WHERE peer_id = ?").all(peerId) as { session_id: string }[];
   for (const s of sessions) {
@@ -266,8 +270,8 @@ function cleanPeerRefs(peerId: string) {
 }
 
 // Wrap in transaction for use as standalone cleanup
-const cleanStalePeerTxn = db.transaction((peerId: string) => {
-  cleanPeerRefs(peerId);
+const cleanStalePeerTxn = db.transaction((peerId: string, reason?: string) => {
+  cleanPeerRefs(peerId, reason ?? "stale PID");
 });
 
 // Clean up stale peers (PIDs that no longer exist)
@@ -277,6 +281,7 @@ function cleanStalePeers() {
     try {
       process.kill(peer.pid, 0);
     } catch {
+      console.error(`[claude-peers broker] stale peer ${peer.id} (PID ${peer.pid} dead) — removing`);
       cleanStalePeerTxn(peer.id);
     }
   }
@@ -443,7 +448,7 @@ const registerTxn = db.transaction((id: string, pid: number, cwd: string, git_ro
   // Remove any existing registration for this PID (re-registration)
   const existing = db.query("SELECT id FROM peers WHERE pid = ?").get(pid) as { id: string } | null;
   if (existing) {
-    cleanPeerRefs(existing.id);
+    cleanPeerRefs(existing.id, "re-registration");
   }
   insertPeer.run(id, pid, cwd, git_root, tty, summary, now, now);
   return id;
@@ -569,7 +574,7 @@ const sessionHeartbeatTxn = db.transaction((body: SessionHeartbeatRequest): { pe
     // Clean any existing peer for this PID (reuse shared cleanup)
     const oldPeer = db.query("SELECT id FROM peers WHERE pid = ?").get(body.pid) as { id: string } | null;
     if (oldPeer) {
-      cleanPeerRefs(oldPeer.id);
+      cleanPeerRefs(oldPeer.id, "session re-registration");
     }
     insertPeer.run(peerId, body.pid, body.cwd, body.git_root, body.tty ?? null, body.task_summary, now, now);
     upsertSession.run(body.session_id, peerId, body.cwd, body.git_root, body.task_summary, now, now);
