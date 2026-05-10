@@ -454,8 +454,40 @@ const registerTxn = db.transaction((id: string, pid: number, cwd: string, git_ro
   return id;
 });
 
-function handleRegister(body: RegisterRequest): RegisterResponse {
-  const id = generateId();
+// External-id format: lowercase alphanumeric, with `_` and `-` allowed; must
+// start with a letter or digit. Keeps bridge names addressable in chat (e.g.
+// `send_message(to_id="telegram", ...)`).
+const EXTERNAL_ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+
+type RegisterError = { error: string; status: number };
+
+function handleRegister(body: RegisterRequest): RegisterResponse | RegisterError {
+  let id: string;
+  if (body.external_id !== undefined) {
+    if (!EXTERNAL_ID_PATTERN.test(body.external_id)) {
+      return {
+        error: `Invalid external_id: must match ${EXTERNAL_ID_PATTERN.source}`,
+        status: 400,
+      };
+    }
+    const existing = db.query("SELECT id, pid FROM peers WHERE id = ?").get(body.external_id) as
+      | { id: string; pid: number }
+      | null;
+    if (existing) {
+      let alive = true;
+      try { process.kill(existing.pid, 0); } catch { alive = false; }
+      if (!alive) {
+        // Stale registration from a crashed bridge — clean it before re-using the id.
+        cleanStalePeerTxn(existing.id, "stale external_id");
+      } else if (existing.pid !== body.pid) {
+        return { error: `Peer ${body.external_id} already registered`, status: 409 };
+      }
+      // Else: same PID re-registering. Fall through; registerTxn cleans by PID.
+    }
+    id = body.external_id;
+  } else {
+    id = generateId();
+  }
   const now = new Date().toISOString();
   registerTxn(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, now);
   return { id };
@@ -896,8 +928,13 @@ Bun.serve({
       const body = await req.json();
 
       switch (path) {
-        case "/register":
-          return Response.json(handleRegister(body as RegisterRequest));
+        case "/register": {
+          const result = handleRegister(body as RegisterRequest);
+          if ("error" in result) {
+            return Response.json({ error: result.error }, { status: result.status });
+          }
+          return Response.json(result);
+        }
         case "/heartbeat":
           handleHeartbeat(body as HeartbeatRequest);
           return Response.json({ ok: true });
