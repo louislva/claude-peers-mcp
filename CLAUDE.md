@@ -15,8 +15,8 @@ Peer discovery and messaging MCP channel for Claude Code instances.
 - `shared/types.ts` — Shared TypeScript types for broker API (Peer, Message, Session, Wave, TaskAssignment).
 - `shared/summarize.ts` — Auto-summary generation via gpt-5.4-nano.
 - `cli.ts` — CLI utility for inspecting broker state, monitoring DB, and maintenance.
-- `gsd-plugin/` — GSD integration: PostToolUse hook, peer coordinator agent, CLAUDE.md snippet.
-- `broker.test.ts` — 23 integration tests covering all endpoints.
+- `bridges/` — External bridges. Each registers a stable peer id via `external_id` and shuttles messages between the broker and an external system. `bridges/common.ts` (BrokerClient + BridgeRunner) is the shared base; `bridges/telegram/telegram.ts` is the first concrete bridge.
+- `broker.test.ts` — Integration tests covering all endpoints.
 
 ## Database
 
