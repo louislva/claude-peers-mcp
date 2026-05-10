@@ -55,71 +55,14 @@ GSD runs one Claude Code instance at a time. Each session is isolated — no awa
 | Task conflict detection | None | File-level conflict checks prevent agents from editing the same files |
 | Wave orchestration | None | Create waves of parallel tasks with dependency tracking |
 | Session tracking | Temp files (fragile) | Durable session state with heartbeats and auto-cleanup |
-| Autonomous pipeline | Single-session sequential | Multi-peer orchestrated execution with tmux spawning |
 
 **The practical difference:** Two Claude instances can negotiate a work split, execute in parallel, and merge — like Mike and Sam did above — without human copy-paste in between.
 
-## Autonomous Pipeline (GSD-SDK + tmux)
+## Bridges
 
-The autonomous pipeline (`/gsd:autonomous-peers`) turns a GSD milestone into a fully hands-off, multi-peer execution run. One orchestrator coordinates everything while executor peers do the actual work — all spawned and managed via tmux.
+External bridges register as stable peers and shuttle messages between the broker and other systems. `bridges/common.ts` provides the shared `BrokerClient` + `BridgeRunner` base; new bridges drop in alongside the Telegram one without touching the broker.
 
-### How it works
-
-```
-  tmux session
-  ┌──────────────────────────────────────────────────────────────┐
-  │ Orchestrator (main pane)                                     │
-  │  - Parses ROADMAP.md phases + dependencies                   │
-  │  - Builds topologically-sorted execution waves               │
-  │  - Plans each phase sequentially                             │
-  │  - Delegates execution to executor peers                     │
-  │                                                              │
-  ├──────────────────────────┬───────────────────────────────────┤
-  │ Executor A (spawned)     │ gsd-watch │ Executor B (spawned) │
-  │  - Receives execute_phase│ (sidebar) │  - Same flow          │
-  │  - Calls /task-start     │           │  - Independent phase  │
-  │  - Runs /gsd:execute-... │           │  - Commits directly   │
-  │  - Reports phase_complete│           │  - Reports back       │
-  └──────────────────────────┴───────────┴───────────────────────┘
-```
-
-### Architecture
-
-| Role | Description |
-|---|---|
-| **Orchestrator** | Single session that owns planning and coordination. Reads ROADMAP.md, resolves dependencies, creates broker waves, dispatches phases to executors. Never executes phases itself (unless no peers are available). |
-| **Executor** | Spawned Claude Code instances that receive `execute_phase` messages, run `/gsd:execute-phase`, and report completion back via the broker. Up to 3 concurrent executors. |
-| **Decision Proxy** | Optional peer primed with user preferences. When the orchestrator hits a `/gsd:discuss-phase` choice point, it asks the proxy instead of blocking for user input. |
-
-### Key features
-
-- **Dependency-aware waves** — Phases are grouped into waves using topological sort. Wave N only starts after Wave N-1 completes.
-- **File-conflict detection** — Phases that touch the same files are serialized into sub-waves automatically.
-- **Dynamic executor spawning** — If more phases need execution than peers are available, the orchestrator spawns new executor panes via tmux (capped at 3).
-- **Stale executor recovery** — 120s with no progress triggers a status probe. No response within 30s triggers task reclaim and reassignment.
-- **Graceful cleanup** — After the final wave, all spawned executor panes are shut down (Ctrl-C, wait, force kill).
-- **Sequential fallback** — No tmux? No peers? Falls back to standard sequential `/gsd:autonomous` automatically.
-
-### Running it
-
-```bash
-# Start inside tmux
-tmux new-session -s gsd
-
-# Launch Claude Code with peers channel
-claude --dangerously-skip-permissions --dangerously-load-development-channels server:gsd-comms
-
-# Then ask:
-#   /gsd:autonomous-peers
-```
-
-The orchestrator discovers peers, analyzes the roadmap, and starts dispatching. Each spawned executor gets a companion `gsd-watch` sidebar for live progress monitoring.
-
-### Requirements for autonomous mode
-
-- **tmux** — `sudo apt install tmux` (Linux) or `brew install tmux` (macOS). Without tmux, falls back to sequential.
-- **GSD v1.30.0+** — The autonomous pipeline uses the GSD-SDK orchestration helpers (`orchestrator-helpers.ts`, `tmux-manager.ts`).
-- **gsd-watch** (optional) — Live sidebar dashboard per executor. Install at `~/.local/bin/gsd-watch`.
+- **Telegram** — `bun run bridge:telegram`. Registers as the peer `telegram`, long-polls Telegram, dispatches `/say`, `/say @<peer-id>`, `/peers`, `/target`, `/help`. Setup: see `bridges/telegram/telegram.ts --help`.
 
 ## Integrated SQLite State Management
 
@@ -374,5 +317,3 @@ bun cli.ts kill-broker       # stop the broker
 - [Bun](https://bun.sh)
 - Claude Code v2.1.80+
 - claude.ai login (channels require it -- API key auth won't work)
-- [GSD v1.30.0+](https://github.com/gsd-build/get-shit-done) (for autonomous pipeline features)
-- tmux (optional — enables dynamic executor spawning for `/gsd:autonomous-peers`)
