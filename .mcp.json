@@ -1,8 +1,14 @@
 {
   "mcpServers": {
     "claude-peers": {
+      "type": "stdio",
       "command": "bun",
-      "args": ["./server.ts"]
-    }
+      "args": [
+        "./client.ts"
+      ],
+      "env": {
+        "CLAUDE_PEERS_REMOTE": "user@ip_host"
+      }
+    }	  
   }
 }
