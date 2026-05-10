@@ -16,7 +16,8 @@
  * %APPDATA%\claude-peers\config.json (Windows).
  */
 
-import { hostname } from "node:os";
+import { hostname, homedir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { loadConfig, resolveGroup } from "./shared/config.ts";
 import {
   getGitBranch,
@@ -57,6 +58,27 @@ function parseRemote(remote: string): { target: string; portArgs: string[] } {
     return { target: match[1], portArgs: ["-p", match[2]] };
   }
   return { target: remote, portArgs: [] };
+}
+
+/**
+ * Returns the path where the peer_id for a given cwd is stored.
+ * Uses ~/.claude/peers/peer-id-<sanitized-cwd>.txt so that both this
+ * process (Bun, Windows paths) and status-line.sh (git-bash, Unix paths)
+ * resolve to the same physical file via the ~/.claude symlink.
+ */
+function peerIdFilePath(cwd: string): string {
+  const cwdKey = cwd.replace(/[^a-zA-Z0-9-]/g, "_").slice(-40);
+  return `${homedir()}/.claude/peers/peer-id-${cwdKey}.txt`;
+}
+
+function writePeerId(peerId: string, cwd: string): void {
+  try {
+    mkdirSync(`${homedir()}/.claude/peers`, { recursive: true });
+    Bun.write(peerIdFilePath(cwd), peerId).catch(() => {});
+    log(`Peer ID saved: ${peerId}`);
+  } catch {
+    // non-critical
+  }
 }
 
 async function main() {
@@ -114,8 +136,33 @@ async function main() {
   const proc = Bun.spawn(["ssh", ...sshArgs], {
     stdin: "pipe",
     stdout: "pipe",
-    stderr: "inherit",
+    stderr: "pipe",
   });
+
+  // Forward stderr line by line, extract peer_id from registration log
+  (async () => {
+    const reader = proc.stderr.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          const m = line.match(/\[claude-peers\] Registered as peer '([^']+)'/);
+          if (m) writePeerId(m[1], cwd);
+          process.stderr.write(line + "\n");
+        }
+      }
+      if (buf) process.stderr.write(buf);
+    } catch {
+      // ssh closed
+    }
+  })();
 
   // Handshake first
   // proc.stdin is a Bun FileSink (not a WritableStream) -- use .write()/.end() directly.

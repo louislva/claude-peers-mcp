@@ -57,8 +57,6 @@ const PEER_ID_REGEX = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 
 const config = await loadConfig();
 const BROKER_URL = brokerUrl(config);
-const POLL_INTERVAL_MS = 30_000; // fallback only; WS push is the primary path
-const POLL_INTERVAL_DISCONNECTED_MS = 5_000; // tighter polling while WS is down
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const HANDSHAKE_TIMEOUT_MS = 2000;
 const WS_RECONNECT_INITIAL_MS = 1000;
@@ -796,52 +794,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 });
 
-// --- Polling fallback ---
-
-async function pollAndPushMessages() {
-  if (!myInstanceToken) return;
-  try {
-    const result = await brokerFetch<PollMessagesResponse>("/poll-messages", {
-      instance_token: myInstanceToken,
-    });
-    if (result.messages.length === 0) return;
-
-    let peers: Peer[] = [];
-    try {
-      peers = await brokerFetch<Peer[]>("/list-peers", {
-        scope: "machine",
-        instance_token: myInstanceToken,
-        cwd: myCwd,
-        git_root: myGitRoot,
-        project_key: myProjectKey,
-      });
-    } catch { /* non-critical */ }
-    const tokenInfo = new Map<string, { peer_id: string; summary: string; host: string; cwd: string }>(
-      peers.map((p) => [p.instance_token, { peer_id: p.peer_id, summary: p.summary, host: p.host ?? "", cwd: p.cwd }])
-    );
-
-    for (const msg of result.messages) {
-      const info = tokenInfo.get(msg.from_token);
-      await mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content: msg.text,
-          meta: {
-            from_peer_id: info?.peer_id ?? "<unknown>",
-            from_summary: info?.summary ?? "",
-            from_cwd: info?.cwd ?? "",
-            from_host: info?.host ?? "",
-            sent_at: msg.sent_at,
-          },
-        },
-      });
-      log(`Pushed (poll) message from ${info?.peer_id ?? msg.from_token}: ${msg.text.slice(0, 80)}`);
-    }
-  } catch (e) {
-    log(`Poll error: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-
 // --- Startup ---
 
 async function main() {
@@ -955,17 +907,6 @@ async function main() {
   // Open WebSocket for push delivery.
   connectWs();
 
-  // Polling fallback. Tighter cadence while WS is down.
-  const pollTimer = setInterval(() => {
-    if (!wsConnected) {
-      // Fast cadence; the longer cadence below will also fire eventually.
-    }
-    void pollAndPushMessages();
-  }, POLL_INTERVAL_DISCONNECTED_MS);
-  const pollLongTimer = setInterval(() => {
-    if (wsConnected) void pollAndPushMessages();
-  }, POLL_INTERVAL_MS);
-
   const heartbeatTimer = setInterval(async () => {
     if (myInstanceToken) {
       try {
@@ -975,8 +916,6 @@ async function main() {
   }, HEARTBEAT_INTERVAL_MS);
 
   const cleanup = async () => {
-    clearInterval(pollTimer);
-    clearInterval(pollLongTimer);
     clearInterval(heartbeatTimer);
     clearWsReconnect();
     if (wsSocket && wsSocket.readyState !== WebSocket.CLOSED) {

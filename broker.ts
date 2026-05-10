@@ -534,7 +534,8 @@ function handleSendMessage(body: SendMessageRequest): SendMessageResponse {
           sent_at: sentAt,
         })
       );
-      markDelivered.run(messageId);
+      // Do NOT markDelivered here: the WS notification is fire-and-forget.
+      // delivered=0 stays until check_messages is explicitly called by the LLM.
     } catch {
       // ws.send can throw on a half-closed socket; let the polling fallback ship it.
     }
@@ -568,7 +569,7 @@ function flushPendingForToken(token: InstanceToken): void {
           sent_at: row.sent_at,
         })
       );
-      markDelivered.run(row.id);
+      // Do NOT markDelivered: same rationale as handleSendMessage.
     } catch {
       break;
     }
