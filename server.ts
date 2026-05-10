@@ -452,16 +452,28 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: TOOLS,
 }));
 
+function formatElapsed(iso: string | null): string {
+  if (!iso) return "never";
+  const elapsed = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(elapsed / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h${mins % 60}m ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function formatPeer(p: Peer): string {
+  const statusLabel = { active: "🟢 active", sleep: "🟡 sleep", closed: "🔴 closed" }[p.activity_status];
   const idLine = p.host && p.client_pid
     ? `peer_id: ${p.peer_id}  (${p.host} - PID: ${p.client_pid})`
     : `peer_id: ${p.peer_id}`;
-  const parts = [idLine, `CWD: ${p.cwd}`];
+  const parts = [`${statusLabel}  ${idLine}`, `CWD: ${p.cwd}`];
   if (p.git_root) parts.push(`Repo: ${p.git_root}`);
   if (p.project_key) parts.push(`Project: ${p.project_key}`);
   if (p.tty) parts.push(`TTY: ${p.tty}`);
   if (p.summary) parts.push(`Summary: ${p.summary}`);
-  parts.push(`Last seen: ${p.last_seen}`);
+  parts.push(`Last exchange: ${formatElapsed(p.last_activity_at)}`);
   return parts.join("\n  ");
 }
 

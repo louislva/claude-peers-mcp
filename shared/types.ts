@@ -28,9 +28,12 @@ export interface Peer {
   client_pid: number; // Client-side PID (Claude Code)
   project_key: string | null; // Normalized git remote URL
   status: PeerStatus;
+  last_activity_at: string | null; // ISO timestamp of last message sent or received
+  activity_status: ActivityStatus;  // computed by broker, not stored
 }
 
 export type PeerStatus = "active" | "dormant";
+export type ActivityStatus = "active" | "sleep" | "closed";
 
 export interface Message {
   id: number;

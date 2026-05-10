@@ -43,6 +43,7 @@ const DORMANT_TTL_HOURS = parseInt(
   10
 );
 const PEER_ID_REGEX = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
+const ACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
 
 try {
   mkdirSync(dirname(DB_PATH), { recursive: true });
@@ -94,6 +95,14 @@ db.run(`
 
 db.run(`CREATE INDEX IF NOT EXISTS idx_peers_group ON peers(group_id)`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_peers_status ON peers(status)`);
+
+// Migration: add last_activity_at column (idempotent)
+try {
+  db.run("ALTER TABLE peers ADD COLUMN last_activity_at TEXT DEFAULT NULL");
+} catch (e) {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (!msg.includes("duplicate column name")) console.error(`[broker] migration: ${msg}`);
+}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS messages (
@@ -208,6 +217,10 @@ const updateLastSeen = db.prepare(
 
 const updateSummary = db.prepare(
   `UPDATE peers SET summary = ? WHERE instance_token = ?`
+);
+
+const updateLastActivity = db.prepare(
+  `UPDATE peers SET last_activity_at = ? WHERE instance_token = ?`
 );
 
 const updateActiveOnRegister = db.prepare(`
@@ -452,38 +465,52 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
   if (!callerRow) return [];
   const groupId = callerRow.group_id;
 
-  let peers: Peer[];
+  type PeerRow = Omit<Peer, "activity_status">;
+  let rows: PeerRow[];
   switch (body.scope) {
     case "machine":
-      peers = db.query(
+      rows = db.query(
         "SELECT * FROM peers WHERE group_id = ? AND status = 'active'"
-      ).all(groupId) as Peer[];
+      ).all(groupId) as PeerRow[];
       break;
     case "directory":
-      peers = db.query(
+      rows = db.query(
         "SELECT * FROM peers WHERE group_id = ? AND status = 'active' AND cwd = ?"
-      ).all(groupId, body.cwd) as Peer[];
+      ).all(groupId, body.cwd) as PeerRow[];
       break;
     case "repo":
       if (body.project_key) {
-        peers = db.query(
+        rows = db.query(
           "SELECT * FROM peers WHERE group_id = ? AND status = 'active' AND project_key = ?"
-        ).all(groupId, body.project_key) as Peer[];
+        ).all(groupId, body.project_key) as PeerRow[];
       } else if (body.git_root) {
-        peers = db.query(
+        rows = db.query(
           "SELECT * FROM peers WHERE group_id = ? AND status = 'active' AND git_root = ?"
-        ).all(groupId, body.git_root) as Peer[];
+        ).all(groupId, body.git_root) as PeerRow[];
       } else {
-        peers = db.query(
+        rows = db.query(
           "SELECT * FROM peers WHERE group_id = ? AND status = 'active' AND cwd = ?"
-        ).all(groupId, body.cwd) as Peer[];
+        ).all(groupId, body.cwd) as PeerRow[];
       }
       break;
     default:
-      peers = [];
+      rows = [];
   }
 
-  return peers.filter((p) => p.instance_token !== body.instance_token);
+  const now = Date.now();
+  return rows
+    .filter((p) => p.instance_token !== body.instance_token)
+    .map((p): Peer => {
+      let activity_status: Peer["activity_status"];
+      if (p.status === "dormant") {
+        activity_status = "closed";
+      } else if (p.last_activity_at && now - new Date(p.last_activity_at).getTime() <= ACTIVITY_TIMEOUT_MS) {
+        activity_status = "active";
+      } else {
+        activity_status = "sleep";
+      }
+      return { ...p, activity_status };
+    });
 }
 
 function handleSendMessage(body: SendMessageRequest): SendMessageResponse {
@@ -517,6 +544,9 @@ function handleSendMessage(body: SendMessageRequest): SendMessageResponse {
     sentAt
   );
   const messageId = Number(result.lastInsertRowid);
+
+  updateLastActivity.run(sentAt, sender.instance_token);
+  updateLastActivity.run(sentAt, target.instance_token);
 
   // Try WebSocket push if the target is connected.
   const ws = wsPool.get(target.instance_token);
