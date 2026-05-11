@@ -4,7 +4,7 @@ import { unlinkSync } from "fs";
 const BROKER_PORT = 17899; // Use a different port for tests
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 let brokerProc: ReturnType<typeof Bun.spawn>;
-const dbPath = `/tmp/claude-peers-test-${Date.now()}.db`;
+const dbPath = `/tmp/gsd-comms-test-${Date.now()}.db`;
 
 async function brokerPost<T = unknown>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BROKER_URL}${path}`, {
@@ -19,8 +19,8 @@ beforeAll(async () => {
   brokerProc = Bun.spawn(["bun", "broker.ts"], {
     env: {
       ...process.env,
-      CLAUDE_PEERS_PORT: String(BROKER_PORT),
-      CLAUDE_PEERS_DB: dbPath,
+      GSD_COMMS_PORT: String(BROKER_PORT),
+      GSD_COMMS_DB: dbPath,
     },
     stdout: "ignore",
     stderr: "pipe",

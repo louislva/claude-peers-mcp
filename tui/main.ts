@@ -19,7 +19,7 @@ const noEmoji = args.includes("--no-emoji");
 const showHelp = args.includes("--help") || args.includes("-h");
 
 if (showHelp) {
-  console.log(`comms-watch — Terminal dashboard for GSD project status and claude-peers broker state
+  console.log(`comms-watch — Terminal dashboard for GSD project status and gsd-comms broker state
 
 Usage:
   bun tui/main.ts [options]
@@ -48,7 +48,7 @@ Tabs:
   6  Stats       DB stats from broker /stats + /health
 
 Environment:
-  CLAUDE_PEERS_PORT   Broker HTTP port (default: 7899)
+  GSD_COMMS_PORT      Broker HTTP port (default: 7899). Legacy CLAUDE_PEERS_PORT still honoured.
 `);
   process.exit(0);
 }

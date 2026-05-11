@@ -15,16 +15,19 @@
 #   help                  This message.
 #
 # Environment:
-#   CLAUDE_PEERS_PORT      Broker port (default: 7899)
-#   CLAUDE_PEERS_DB        DB path (default: ~/.claude-peers.db)
-#   GSD_COMMS_MCP_NAME     Override the registered MCP name (default: claude-peers,
+#   GSD_COMMS_PORT         Broker port (default: 7899). Legacy CLAUDE_PEERS_PORT
+#                          still works with a deprecation note from the daemons.
+#   GSD_COMMS_DB           DB path (default: ~/.gsd-comms.db). Legacy
+#                          CLAUDE_PEERS_DB still works; the broker auto-migrates
+#                          ~/.claude-peers.db to ~/.gsd-comms.db on first start.
+#   GSD_COMMS_MCP_NAME     Override the registered MCP name (default: gsd-comms,
 #                          matching the project's .mcp.json)
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-MCP_NAME="${GSD_COMMS_MCP_NAME:-claude-peers}"
-BROKER_PORT="${CLAUDE_PEERS_PORT:-7899}"
+MCP_NAME="${GSD_COMMS_MCP_NAME:-gsd-comms}"
+BROKER_PORT="${GSD_COMMS_PORT:-${CLAUDE_PEERS_PORT:-7899}}"
 CMD="${1:-install}"
 
 # ---- colors / logging -------------------------------------------------------
@@ -277,7 +280,7 @@ cmd_uninstall() {
     warn "This script does NOT modify .mcp.json. Remove it manually if you want to fully uninstall."
   fi
   log "repo files at $REPO_DIR are untouched"
-  log "database at \${CLAUDE_PEERS_DB:-~/.claude-peers.db} is untouched (delete manually if desired)"
+  log "database at \${GSD_COMMS_DB:-~/.gsd-comms.db} is untouched (delete manually if desired)"
 }
 
 case "$CMD" in

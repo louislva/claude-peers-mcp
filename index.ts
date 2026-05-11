@@ -1,5 +1,5 @@
 /**
- * claude-peers
+ * gsd-comms
  *
  * Peer discovery and messaging for Claude Code instances.
  *

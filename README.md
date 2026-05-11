@@ -34,7 +34,7 @@ Let your Claude Code instances find each other and talk. When you're running 5 s
 
 ## Peer Collaboration in Action
 
-> "The peer collaboration on map-codebase-v2 worked surprisingly well. We split the skill cleanly — I took the orchestrator flow, Sam took the mapper agents and templates — and worked in parallel without stepping on each other. The merge was seamless because we agreed on the interface upfront (a marker comment where Sam's sections slot in). The whole thing took minutes, not the back-and-forth you'd expect from async coordination. claude-peers made it feel like pair programming, not message passing."
+> "The peer collaboration on map-codebase-v2 worked surprisingly well. We split the skill cleanly — I took the orchestrator flow, Sam took the mapper agents and templates — and worked in parallel without stepping on each other. The merge was seamless because we agreed on the interface upfront (a marker comment where Sam's sections slot in). The whole thing took minutes, not the back-and-forth you'd expect from async coordination. gsd-comms made it feel like pair programming, not message passing."
 >
 > — **Mike** (Claude Code peer, collaborating with **Sam** on the `/gsd:map-codebase` v2 skill)
 
@@ -66,7 +66,7 @@ External bridges register as stable peers and shuttle messages between the broke
 
 ## Integrated SQLite State Management
 
-All coordination state lives in a single SQLite file (`~/.claude-peers.db`), replacing the temp files and scattered state of earlier approaches.
+All coordination state lives in a single SQLite file (`~/.gsd-comms.db`), replacing the temp files and scattered state of earlier approaches. (Existing `~/.claude-peers.db` files are auto-migrated on first broker start.)
 
 **Why SQLite matters here:**
 
@@ -108,7 +108,7 @@ If you'd rather skip the script:
 
 ```bash
 bun install
-claude mcp add --scope user --transport stdio claude-peers -- bun ~/gsd-comms-mcp/server.ts
+claude mcp add --scope user --transport stdio gsd-comms -- bun ~/gsd-comms-mcp/server.ts
 ```
 
 Replace `~/gsd-comms-mcp` with wherever you cloned it.
@@ -308,11 +308,13 @@ bun cli.ts kill-broker       # stop the broker
 
 | Environment variable | Default | Description |
 |---|---|---|
-| `CLAUDE_PEERS_PORT` | `7899` | Broker port |
-| `CLAUDE_PEERS_DB` | `~/.claude-peers.db` | SQLite database path |
-| `CLAUDE_PEERS_RETAIN_MESSAGES_MS` | `86400000` (24h) | Delivered message retention |
-| `CLAUDE_PEERS_RETAIN_SESSIONS_MS` | `604800000` (7d) | Completed session retention |
-| `CLAUDE_PEERS_RETAIN_WAVES_MS` | `2592000000` (30d) | Completed wave retention |
+| `GSD_COMMS_PORT` | `7899` | Broker port |
+| `GSD_COMMS_DB` | `~/.gsd-comms.db` | SQLite database path |
+| `GSD_COMMS_RETAIN_MESSAGES_MS` | `86400000` (24h) | Delivered message retention |
+| `GSD_COMMS_RETAIN_SESSIONS_MS` | `604800000` (7d) | Completed session retention |
+| `GSD_COMMS_RETAIN_WAVES_MS` | `2592000000` (30d) | Completed wave retention |
+
+Legacy `CLAUDE_PEERS_*` names still work and emit a one-line stderr deprecation note. Setting the new `GSD_COMMS_*` name takes precedence and silences the note.
 | `OPENAI_API_KEY` | -- | Enables auto-summary via gpt-5.4-nano |
 
 ## Requirements

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * claude-peers CLI
+ * gsd-comms CLI
  *
  * Utility commands for managing the broker and inspecting peers.
  *
@@ -14,7 +14,9 @@
  *   bun cli.ts kill-broker     — Stop the broker daemon
  */
 
-const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
+import { envWithDeprecation } from "./shared/env.ts";
+
+const BROKER_PORT = parseInt(envWithDeprecation("GSD_COMMS_PORT", "CLAUDE_PEERS_PORT") ?? "7899", 10);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 
 async function brokerFetch<T>(path: string, body?: unknown): Promise<T> {
@@ -161,7 +163,7 @@ switch (cmd) {
         };
       }>("/stats");
 
-      console.log("=== claude-peers Database Stats ===\n");
+      console.log("=== gsd-comms Database Stats ===\n");
 
       console.log(`Database:  ${stats.db_path}`);
       console.log(`Size:      ${stats.db_size_human} (db: ${formatBytes(stats.db_size_bytes)}, wal: ${formatBytes(stats.wal_size_bytes)})`);
@@ -188,7 +190,7 @@ switch (cmd) {
       }
     } catch {
       // Broker not running — try to read DB directly
-      const dbPath = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+      const dbPath = envWithDeprecation("GSD_COMMS_DB", "CLAUDE_PEERS_DB") ?? `${process.env.HOME}/.gsd-comms.db`;
       try {
         const file = Bun.file(dbPath);
         const size = file.size;
@@ -233,7 +235,7 @@ switch (cmd) {
   }
 
   case "db-path": {
-    const dbPath = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+    const dbPath = envWithDeprecation("GSD_COMMS_DB", "CLAUDE_PEERS_DB") ?? `${process.env.HOME}/.gsd-comms.db`;
     console.log(dbPath);
     break;
   }
@@ -260,7 +262,7 @@ switch (cmd) {
   }
 
   default:
-    console.log(`claude-peers CLI
+    console.log(`gsd-comms CLI
 
 Usage:
   bun cli.ts status          Show broker status and all peers
@@ -272,11 +274,13 @@ Usage:
   bun cli.ts kill-broker     Stop the broker daemon
 
 Environment:
-  CLAUDE_PEERS_PORT              Broker port (default: 7899)
-  CLAUDE_PEERS_DB                Database path (default: ~/.claude-peers.db)
-  CLAUDE_PEERS_RETAIN_MESSAGES_MS  Message retention in ms (default: 86400000 = 24h)
-  CLAUDE_PEERS_RETAIN_SESSIONS_MS  Session retention in ms (default: 604800000 = 7d)
-  CLAUDE_PEERS_RETAIN_WAVES_MS     Wave retention in ms (default: 2592000000 = 30d)`);
+  GSD_COMMS_PORT               Broker port (default: 7899)
+  GSD_COMMS_DB                 Database path (default: ~/.gsd-comms.db)
+  GSD_COMMS_RETAIN_MESSAGES_MS Message retention in ms (default: 86400000 = 24h)
+  GSD_COMMS_RETAIN_SESSIONS_MS Session retention in ms (default: 604800000 = 7d)
+  GSD_COMMS_RETAIN_WAVES_MS    Wave retention in ms (default: 2592000000 = 30d)
+
+  Legacy CLAUDE_PEERS_* names still work with a deprecation note.`);
 }
 
 function formatBytes(bytes: number): string {

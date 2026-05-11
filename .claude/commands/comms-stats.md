@@ -1,6 +1,6 @@
 ---
 name: comms-stats
-description: "Show claude-peers broker stats inline"
+description: "Show gsd-comms broker stats inline"
 allowed-tools: Bash
 ---
 
@@ -8,7 +8,7 @@ Show broker database statistics inline. Follow these steps using the Bash tool:
 
 **Step 1 — Fetch stats from broker:**
 
-Run: `curl -s --max-time 3 http://127.0.0.1:${CLAUDE_PEERS_PORT:-7899}/stats`
+Run: `curl -s --max-time 3 http://127.0.0.1:${GSD_COMMS_PORT:-${CLAUDE_PEERS_PORT:-7899}}/stats`
 
 If curl exits with a non-zero exit code or the output is empty (broker is not running or unreachable), print exactly:
 

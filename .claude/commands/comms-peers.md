@@ -1,14 +1,14 @@
 ---
 name: comms-peers
-description: "List active claude-peers instances inline"
+description: "List active gsd-comms instances inline"
 allowed-tools: Bash
 ---
 
-List active claude-peers instances by querying the broker. Follow these steps using the Bash tool:
+List active gsd-comms instances by querying the broker. Follow these steps using the Bash tool:
 
 **Step 1 — Fetch peer list from broker:**
 
-Run: `curl -s --max-time 3 -X POST -H 'Content-Type: application/json' -d '{"scope":"machine","cwd":"/","git_root":null}' http://127.0.0.1:${CLAUDE_PEERS_PORT:-7899}/list-peers`
+Run: `curl -s --max-time 3 -X POST -H 'Content-Type: application/json' -d '{"scope":"machine","cwd":"/","git_root":null}' http://127.0.0.1:${GSD_COMMS_PORT:-${CLAUDE_PEERS_PORT:-7899}}/list-peers`
 
 If curl exits with a non-zero exit code or the output is empty (broker is not running or unreachable), print exactly:
 
