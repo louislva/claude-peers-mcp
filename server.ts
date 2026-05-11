@@ -57,18 +57,28 @@ const PEER_ID_REGEX = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 
 const config = await loadConfig();
 const BROKER_URL = brokerUrl(config);
+const BROKER_TOKEN = config.broker_token ?? null;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const HANDSHAKE_TIMEOUT_MS = 2000;
 const WS_RECONNECT_INITIAL_MS = 1000;
 const WS_RECONNECT_MAX_MS = 30_000;
+// Fallback poll interval used when the WebSocket connection is down.
+// Does NOT mark messages as delivered -- only check_messages does that.
+const POLL_FALLBACK_INTERVAL_MS = parseInt(process.env.CLAUDE_PEERS_POLL_FALLBACK_SEC ?? "5", 10) * 1000;
 const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
 
 // --- Broker HTTP communication ---
 
+function brokerHeaders(extra?: Record<string, string>): Record<string, string> {
+  const h: Record<string, string> = { ...extra };
+  if (BROKER_TOKEN) h["Authorization"] = `Bearer ${BROKER_TOKEN}`;
+  return h;
+}
+
 async function brokerFetch<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BROKER_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: brokerHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -79,7 +89,7 @@ async function brokerFetch<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function brokerGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${BROKER_URL}${path}`);
+  const res = await fetch(`${BROKER_URL}${path}`, { headers: brokerHeaders() });
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`Broker error (${path}): ${res.status} ${err}`);
@@ -304,6 +314,52 @@ function connectWs() {
     // 'close' will fire too -- log here just for visibility
     wsConnected = false;
   });
+}
+
+// --- Fallback poll (WS down path) ---
+
+// Peeks at undelivered messages WITHOUT marking them delivered, then pushes
+// mcp.notification() for each. Runs only when the WebSocket is disconnected,
+// so it does not duplicate the real-time WS push. Messages stay delivered=0
+// until Claude explicitly calls check_messages.
+async function pollFallback() {
+  if (wsConnected || !myInstanceToken) return;
+  try {
+    const result = await brokerFetch<PollMessagesResponse>("/peek-messages", {
+      instance_token: myInstanceToken,
+    });
+    if (result.messages.length === 0) return;
+    // Best-effort resolution of from_token -> Peer for richer notification meta.
+    let tokenToPeer = new Map<string, Peer>();
+    try {
+      const peers = await brokerFetch<Peer[]>("/list-peers", {
+        scope: "machine",
+        instance_token: myInstanceToken,
+        cwd: myCwd,
+        git_root: myGitRoot,
+        project_key: myProjectKey,
+      });
+      tokenToPeer = new Map(peers.map((p) => [p.instance_token, p]));
+    } catch { /* non-fatal */ }
+    for (const msg of result.messages) {
+      const peer = tokenToPeer.get(msg.from_token);
+      try {
+        await mcp.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: msg.text,
+            meta: {
+              from_peer_id: peer?.peer_id ?? msg.from_token,
+              from_summary: peer?.summary ?? "",
+              from_cwd: peer?.cwd ?? "",
+              from_host: peer?.host ?? "",
+              sent_at: msg.sent_at,
+            },
+          },
+        });
+      } catch { /* fire-and-forget */ }
+    }
+  } catch { /* non-fatal */ }
 }
 
 // --- MCP server ---
@@ -927,8 +983,11 @@ async function main() {
     }
   }, HEARTBEAT_INTERVAL_MS);
 
+  const fallbackPollTimer = setInterval(() => { pollFallback().catch(() => {}); }, POLL_FALLBACK_INTERVAL_MS);
+
   const cleanup = async () => {
     clearInterval(heartbeatTimer);
+    clearInterval(fallbackPollTimer);
     clearWsReconnect();
     if (wsSocket && wsSocket.readyState !== WebSocket.CLOSED) {
       try { wsSocket.close(); } catch { /* ignore */ }

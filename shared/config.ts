@@ -43,6 +43,12 @@ export interface Config {
   groups: Record<string, string>;
   /** v0.3 -- default group name to use when no project file overrides. null means fall through to env then 'default' sentinel. */
   default_group: string | null;
+  /** HTTP mode: direct broker URL (e.g. "http://my-server:7899"). Overrides loopback. */
+  broker_url: string | null;
+  /** HTTP mode: Bearer token required by the broker. Sent on all HTTP and WS-upgrade requests. */
+  broker_token: string | null;
+  /** Broker bind host. null = "127.0.0.1" (loopback only). Set "0.0.0.0" for public access. */
+  bind_host: string | null;
 }
 
 interface FileConfig {
@@ -59,6 +65,9 @@ interface FileConfig {
   anthropic_model?: string;
   groups?: Record<string, string>;
   default_group?: string;
+  broker_url?: string;
+  broker_token?: string;
+  bind_host?: string;
 }
 
 const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
@@ -166,6 +175,9 @@ export async function loadConfig(): Promise<Config> {
 
   const groups: Record<string, string> = fileCfg.groups ?? {};
   const default_group = fileCfg.default_group ?? null;
+  const broker_url = process.env.CLAUDE_PEERS_BROKER_URL ?? fileCfg.broker_url ?? null;
+  const broker_token = process.env.CLAUDE_PEERS_BROKER_TOKEN ?? fileCfg.broker_token ?? null;
+  const bind_host = process.env.CLAUDE_PEERS_BIND_HOST ?? fileCfg.bind_host ?? null;
 
   return {
     port,
@@ -179,6 +191,9 @@ export async function loadConfig(): Promise<Config> {
     summary_model,
     groups,
     default_group,
+    broker_url,
+    broker_token,
+    bind_host,
   };
 }
 
@@ -198,9 +213,11 @@ export function resolveProvider(config: Config): Exclude<SummaryProvider, "auto"
 }
 
 /**
- * Build the broker URL from the resolved config (loopback only).
+ * Build the broker URL from the resolved config.
+ * If broker_url is set, use it directly (HTTP mode). Otherwise, loopback.
  */
 export function brokerUrl(config: Config): string {
+  if (config.broker_url) return config.broker_url;
   return `http://127.0.0.1:${config.port}`;
 }
 

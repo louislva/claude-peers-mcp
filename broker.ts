@@ -38,12 +38,15 @@ import type {
 const config = await loadConfig();
 const PORT = config.port;
 const DB_PATH = config.db;
+const BIND_HOST = config.bind_host ?? "127.0.0.1";
+const BROKER_TOKEN = config.broker_token ?? null;
 const DORMANT_TTL_HOURS = parseInt(
   process.env.CLAUDE_PEERS_DORMANT_TTL_HOURS ?? "24",
   10
 );
 const PEER_ID_REGEX = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
-const ACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+const ACTIVITY_TIMEOUT_MS = parseInt(process.env.CLAUDE_PEERS_ACTIVITY_TIMEOUT_SEC ?? "1800", 10) * 1000;
+const WS_IDLE_TIMEOUT_SEC = parseInt(process.env.CLAUDE_PEERS_WS_IDLE_TIMEOUT_SEC ?? "600", 10);
 
 try {
   mkdirSync(dirname(DB_PATH), { recursive: true });
@@ -616,6 +619,15 @@ function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   return { messages };
 }
 
+// Like handlePollMessages but does NOT mark delivered.
+// Used by the server-side fallback poll (WS down) to push mcp.notification()
+// without consuming messages -- only check_messages marks delivered.
+function handlePeekMessages(body: PollMessagesRequest): PollMessagesResponse {
+  type MessageRow = Omit<Message, "delivered"> & { delivered: number };
+  const rows = selectUndelivered.all(body.instance_token) as MessageRow[];
+  return { messages: rows.map((r) => ({ ...r, delivered: Boolean(r.delivered) })) };
+}
+
 function handleGroupStats(): GroupStatsResponse {
   const rows = db.query(
     "SELECT group_id, COUNT(*) AS active_peers FROM peers WHERE status = 'active' GROUP BY group_id"
@@ -630,11 +642,20 @@ const wsPool = new Map<InstanceToken, import("bun").ServerWebSocket<WsData>>();
 
 // --- HTTP + WebSocket server ---
 
+// Returns a 401 Response if BROKER_TOKEN is configured and the request lacks a valid
+// "Authorization: Bearer <token>" header. Returns null when auth passes or is disabled.
+// /health is always exempt so monitoring tools can reach it without credentials.
+function unauthorizedIfToken(req: Request): Response | null {
+  if (!BROKER_TOKEN) return null;
+  if (req.headers.get("Authorization") === `Bearer ${BROKER_TOKEN}`) return null;
+  return new Response("Unauthorized", { status: 401 });
+}
+
 const server = Bun.serve<WsData>({
   port: PORT,
-  hostname: "127.0.0.1",
+  hostname: BIND_HOST,
   websocket: {
-    idleTimeout: 600,
+    idleTimeout: WS_IDLE_TIMEOUT_SEC,
     open(ws) {
       // The auth handshake happens in the first message frame.
       // Until then, the socket is not in the pool.
@@ -666,6 +687,11 @@ const server = Bun.serve<WsData>({
   async fetch(req, server) {
     const url = new URL(req.url);
     const path = url.pathname;
+
+    if (path !== "/health") {
+      const deny = unauthorizedIfToken(req);
+      if (deny) return deny;
+    }
 
     if (path === "/ws") {
       if (server.upgrade(req, { data: { instance_token: null } as WsData })) {
@@ -730,6 +756,8 @@ const server = Bun.serve<WsData>({
           return Response.json(handleSendMessage(body as SendMessageRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
+        case "/peek-messages":
+          return Response.json(handlePeekMessages(body as PollMessagesRequest));
         case "/group-stats":
           return Response.json(handleGroupStats());
         default:
@@ -743,5 +771,5 @@ const server = Bun.serve<WsData>({
 });
 
 console.error(
-  `[claude-peers broker v0.3] listening on 127.0.0.1:${PORT} (db: ${DB_PATH}, dormant_ttl=${DORMANT_TTL_HOURS}h)`
+  `[claude-peers broker v0.3] listening on ${BIND_HOST}:${PORT} (db: ${DB_PATH}, dormant_ttl=${DORMANT_TTL_HOURS}h, activity_timeout=${ACTIVITY_TIMEOUT_MS / 1000}s, ws_idle=${WS_IDLE_TIMEOUT_SEC}s, auth=${BROKER_TOKEN ? "token" : "none"})`
 );
