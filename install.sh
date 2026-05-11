@@ -123,10 +123,12 @@ register_mcp_if_missing() {
 }
 
 reregister_mcp_user_scope() {
-  if mcp_registered_user_scope; then
-    log "removing existing user-scope registration"
-    remove_user_scope_quiet
-  fi
+  # Always remove first. `claude mcp get` only reports the highest-priority
+  # scope, so a project-scope registration can shadow a user-scope one and
+  # mask its existence — but `claude mcp add --scope user` will still 409 if
+  # it's there. The remove is quiet either way.
+  log "clearing any existing user-scope registration"
+  remove_user_scope_quiet
   register_user_scope
 }
 
