@@ -57,7 +57,7 @@ export async function generateSummary(context: {
   const prompt = `You generate brief summaries of what a developer is working on based on their project context. Respond with exactly 1-2 sentences, no more. Be specific about the project name and likely task.\n\nBased on this context, what is this developer likely working on?\n\n${parts.join("\n")}`;
 
   // Use a temp file for clean output (codex exec -o writes only the final message)
-  const outputFile = `/tmp/claude-peers-summary-${process.pid}-${Date.now()}.txt`;
+  const outputFile = `/tmp/gsd-comms-summary-${process.pid}-${Date.now()}.txt`;
 
   try {
     const proc = Bun.spawn(

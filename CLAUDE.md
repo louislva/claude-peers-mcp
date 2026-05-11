@@ -20,7 +20,7 @@ Peer discovery and messaging MCP channel for Claude Code instances.
 
 ## Database
 
-All state lives in a single SQLite file (`~/.claude-peers.db`), shared across all sessions on the machine.
+All state lives in a single SQLite file (`~/.gsd-comms.db`), shared across all sessions on the machine. The broker auto-migrates an existing `~/.claude-peers.db` to the new path on first start.
 
 **Tables:**
 - `peers` — Active Claude Code instances (cleaned on PID death)
@@ -37,10 +37,10 @@ All state lives in a single SQLite file (`~/.claude-peers.db`), shared across al
 
 ```bash
 # Start Claude Code with the channel:
-claude --dangerously-load-development-channels server:claude-peers
+claude --dangerously-load-development-channels server:gsd-comms
 
 # Or just add to .mcp.json and use as regular MCP (no channel push, but tools work):
-# { "claude-peers": { "command": "bun", "args": ["./server.ts"] } }
+# { "gsd-comms": { "command": "bun", "args": ["./server.ts"] } }
 
 # CLI:
 bun cli.ts status          # Broker status + active peers
@@ -101,11 +101,13 @@ bun cli.ts kill-broker     # Stop the broker daemon
 
 | Variable | Default | Description |
 |---|---|---|
-| `CLAUDE_PEERS_PORT` | `7899` | Broker HTTP port |
-| `CLAUDE_PEERS_DB` | `~/.claude-peers.db` | SQLite database path |
-| `CLAUDE_PEERS_RETAIN_MESSAGES_MS` | `86400000` (24h) | Delivered message retention |
-| `CLAUDE_PEERS_RETAIN_SESSIONS_MS` | `604800000` (7d) | Completed session retention |
-| `CLAUDE_PEERS_RETAIN_WAVES_MS` | `2592000000` (30d) | Completed wave retention |
+| `GSD_COMMS_PORT` | `7899` | Broker HTTP port |
+| `GSD_COMMS_DB` | `~/.gsd-comms.db` | SQLite database path |
+| `GSD_COMMS_RETAIN_MESSAGES_MS` | `86400000` (24h) | Delivered message retention |
+| `GSD_COMMS_RETAIN_SESSIONS_MS` | `604800000` (7d) | Completed session retention |
+| `GSD_COMMS_RETAIN_WAVES_MS` | `2592000000` (30d) | Completed wave retention |
+
+The legacy `CLAUDE_PEERS_*` variants still work — the broker reads them with a one-line stderr deprecation notice. Set the new `GSD_COMMS_*` names to silence the notice.
 
 ## Bun
 

@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "claude-peers": {
+    "gsd-comms": {
       "command": "bun",
       "args": ["./server.ts"]
     }

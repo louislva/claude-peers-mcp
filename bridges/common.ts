@@ -25,9 +25,11 @@ import type {
 // BrokerClient
 // ---------------------------------------------------------------------------
 
+import { envWithDeprecation } from "../shared/env.ts";
+
 const DEFAULT_BROKER_URL =
-  process.env.CLAUDE_PEERS_BROKER_URL ??
-  `http://127.0.0.1:${process.env.CLAUDE_PEERS_PORT ?? "7899"}`;
+  envWithDeprecation("GSD_COMMS_BROKER_URL", "CLAUDE_PEERS_BROKER_URL") ??
+  `http://127.0.0.1:${envWithDeprecation("GSD_COMMS_PORT", "CLAUDE_PEERS_PORT") ?? "7899"}`;
 
 export interface BrokerClientOptions {
   brokerUrl?: string;

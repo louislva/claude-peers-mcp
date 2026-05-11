@@ -6,7 +6,12 @@
  * Zero external dependencies — uses global fetch with AbortSignal.timeout.
  */
 
-const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
+import { envWithDeprecation } from "../shared/env.ts";
+
+const BROKER_PORT = parseInt(
+  envWithDeprecation("GSD_COMMS_PORT", "CLAUDE_PEERS_PORT") ?? "7899",
+  10
+);
 export const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 
 /**

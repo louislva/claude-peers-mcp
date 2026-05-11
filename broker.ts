@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * claude-peers broker daemon
+ * gsd-comms broker daemon
  *
  * A singleton HTTP server on localhost:7899 backed by SQLite.
  * Tracks all registered Claude Code peers and routes messages between them.
@@ -9,6 +9,7 @@
  * Run directly: bun broker.ts
  */
 
+import { existsSync, renameSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import type {
   RegisterRequest,
@@ -29,9 +30,31 @@ import type {
   AvailablePeer,
   BusyPeer,
 } from "./shared/types.ts";
+import { envWithDeprecation } from "./shared/env.ts";
 
-const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
-const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+const PORT = parseInt(envWithDeprecation("GSD_COMMS_PORT", "CLAUDE_PEERS_PORT") ?? "7899", 10);
+
+// DB path: prefer GSD_COMMS_DB; fall back to legacy CLAUDE_PEERS_DB; else
+// default to the new ~/.gsd-comms.db location. If the user is on defaults and
+// only the legacy file exists, migrate it in-place at startup so we don't
+// silently drop their accumulated peer state.
+const explicitDbPath = envWithDeprecation("GSD_COMMS_DB", "CLAUDE_PEERS_DB");
+const NEW_DEFAULT_DB = `${process.env.HOME}/.gsd-comms.db`;
+const LEGACY_DEFAULT_DB = `${process.env.HOME}/.claude-peers.db`;
+
+if (!explicitDbPath && !existsSync(NEW_DEFAULT_DB) && existsSync(LEGACY_DEFAULT_DB)) {
+  console.error(
+    `[gsd-comms broker] migrating ${LEGACY_DEFAULT_DB} → ${NEW_DEFAULT_DB}`
+  );
+  renameSync(LEGACY_DEFAULT_DB, NEW_DEFAULT_DB);
+  for (const suffix of ["-wal", "-shm"]) {
+    if (existsSync(LEGACY_DEFAULT_DB + suffix)) {
+      renameSync(LEGACY_DEFAULT_DB + suffix, NEW_DEFAULT_DB + suffix);
+    }
+  }
+}
+
+const DB_PATH = explicitDbPath ?? NEW_DEFAULT_DB;
 
 // --- Database setup ---
 
@@ -258,7 +281,7 @@ const selectPeersWithTaskState = db.prepare(`
 function cleanPeerRefs(peerId: string, reason?: string) {
   const msgCount = (db.query("SELECT COUNT(*) as cnt FROM messages WHERE from_id = ? OR to_id = ?").get(peerId, peerId) as { cnt: number }).cnt;
   if (msgCount > 0) {
-    console.error(`[claude-peers broker] cleaning peer ${peerId}${reason ? ` (${reason})` : ""}: deleting ${msgCount} message(s)`);
+    console.error(`[gsd-comms broker] cleaning peer ${peerId}${reason ? ` (${reason})` : ""}: deleting ${msgCount} message(s)`);
   }
   db.run("DELETE FROM messages WHERE from_id = ? OR to_id = ?", [peerId, peerId]);
   const sessions = db.query("SELECT session_id FROM sessions WHERE peer_id = ?").all(peerId) as { session_id: string }[];
@@ -281,7 +304,7 @@ function cleanStalePeers() {
     try {
       process.kill(peer.pid, 0);
     } catch {
-      console.error(`[claude-peers broker] stale peer ${peer.id} (PID ${peer.pid} dead) — removing`);
+      console.error(`[gsd-comms broker] stale peer ${peer.id} (PID ${peer.pid} dead) — removing`);
       cleanStalePeerTxn(peer.id);
     }
   }
@@ -295,9 +318,18 @@ function parseRetentionMs(envVar: string | undefined, defaultMs: number): number
   const parsed = parseInt(envVar, 10);
   return Number.isNaN(parsed) || parsed <= 0 ? defaultMs : parsed;
 }
-const RETAIN_MESSAGES_MS = parseRetentionMs(process.env.CLAUDE_PEERS_RETAIN_MESSAGES_MS, 24 * 60 * 60 * 1000);
-const RETAIN_SESSIONS_MS = parseRetentionMs(process.env.CLAUDE_PEERS_RETAIN_SESSIONS_MS, 7 * 24 * 60 * 60 * 1000);
-const RETAIN_WAVES_MS = parseRetentionMs(process.env.CLAUDE_PEERS_RETAIN_WAVES_MS, 30 * 24 * 60 * 60 * 1000);
+const RETAIN_MESSAGES_MS = parseRetentionMs(
+  envWithDeprecation("GSD_COMMS_RETAIN_MESSAGES_MS", "CLAUDE_PEERS_RETAIN_MESSAGES_MS"),
+  24 * 60 * 60 * 1000
+);
+const RETAIN_SESSIONS_MS = parseRetentionMs(
+  envWithDeprecation("GSD_COMMS_RETAIN_SESSIONS_MS", "CLAUDE_PEERS_RETAIN_SESSIONS_MS"),
+  7 * 24 * 60 * 60 * 1000
+);
+const RETAIN_WAVES_MS = parseRetentionMs(
+  envWithDeprecation("GSD_COMMS_RETAIN_WAVES_MS", "CLAUDE_PEERS_RETAIN_WAVES_MS"),
+  30 * 24 * 60 * 60 * 1000
+);
 
 const pruneOldData = db.transaction(() => {
   const now = Date.now();
@@ -921,7 +953,7 @@ Bun.serve({
       if (path === "/stats") {
         return Response.json(getStats());
       }
-      return new Response("claude-peers broker", { status: 200 });
+      return new Response("gsd-comms broker", { status: 200 });
     }
 
     try {
@@ -1004,4 +1036,4 @@ Bun.serve({
   },
 });
 
-console.error(`[claude-peers broker] listening on 127.0.0.1:${PORT} (db: ${DB_PATH})`);
+console.error(`[gsd-comms broker] listening on 127.0.0.1:${PORT} (db: ${DB_PATH})`);
