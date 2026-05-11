@@ -31,6 +31,7 @@ import {
   getGitBranch,
   getRecentFiles,
 } from "./shared/summarize.ts";
+import { detectChannelLoaded } from "./shared/channel-detection.ts";
 
 // --- Configuration ---
 
@@ -513,12 +514,12 @@ async function main() {
     });
   }
 
-  // 5. Connect MCP. After handshake, record on the broker whether the client
-  //    advertised experimental["claude/channel"] so list_peers can surface it.
-  //    The post is retried on the next heartbeat tick if the initial attempt
-  //    fails — otherwise a momentarily-unreachable broker would leave this
-  //    peer's channel_loaded stuck at the registered default for its lifetime.
-  const CHANNEL_CAPABILITY_KEY = "claude/channel";
+  // 5. Detect channel-load state from the parent claude process's argv and
+  //    record it on the broker. See shared/channel-detection.ts for why this
+  //    is argv-based rather than MCP-capability-based. The post is retried on
+  //    the next heartbeat tick if the initial attempt fails — otherwise a
+  //    momentarily-unreachable broker would leave this peer's channel_loaded
+  //    stuck at the registered default for its lifetime.
   let pendingChannelCapability: boolean | null = null;
 
   async function postCapability(value: boolean): Promise<void> {
@@ -532,12 +533,17 @@ async function main() {
     }
   }
 
-  mcp.oninitialized = () => {
-    const caps = mcp.getClientCapabilities();
-    const channelLoaded = Boolean(caps?.experimental?.[CHANNEL_CAPABILITY_KEY]);
-    log(`Client channel capability: ${channelLoaded ? "loaded" : "not loaded"}`);
-    void postCapability(channelLoaded);
-  };
+  // Crash isolation: detectChannelLoaded is best-effort metadata; an unforeseen
+  // throw (Bun runtime regression, TextDecoder edge case, etc.) should NOT kill
+  // the server before MCP connects. Consistent with summary/broker/registration.
+  let channelLoaded = false;
+  try {
+    channelLoaded = await detectChannelLoaded();
+  } catch (e) {
+    log(`detectChannelLoaded threw, defaulting to false: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  log(`Channel loaded: ${channelLoaded} (from parent argv)`);
+  void postCapability(channelLoaded);
 
   await mcp.connect(new StdioServerTransport());
   log("MCP connected");
