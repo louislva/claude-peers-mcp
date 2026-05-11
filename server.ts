@@ -139,7 +139,22 @@ function getTty(): string | null {
 let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
-const pendingAckIds = new Set<number>(); // Messages polled but not yet ACKed
+const pendingAckIds = new Set<number>(); // Prevents duplicate channel pushes
+const pendingPushTimes = new Map<number, number>(); // msg id -> push timestamp (ms)
+const REPUSH_TIMEOUT_MS = 30_000;  // re-push if Claude hasn't replied within 30s
+const MAX_PENDING_MS = 600_000;    // unconditional ACK after 10 min (safety net)
+
+/** ACK all pending messages — call when Claude is confirmed active (e.g. send_message). */
+async function ackAllPending(): Promise<void> {
+  if (!myId || pendingAckIds.size === 0) return;
+  const ids = [...pendingAckIds];
+  try {
+    await brokerFetch("/ack-message", { message_ids: ids });
+    for (const id of ids) { pendingAckIds.delete(id); pendingPushTimes.delete(id); }
+  } catch {
+    // Will retry on next opportunity
+  }
+}
 
 // --- MCP Server ---
 
@@ -304,6 +319,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           isError: true,
         };
       }
+      // Claude is clearly active and replying — ACK pending channel pushes now
+      await ackAllPending();
       try {
         const result = await brokerFetch<{ ok: boolean; error?: string }>("/send-message", {
           from_id: myId,
@@ -428,7 +445,22 @@ async function pollAndPushMessages() {
       // Non-critical, proceed without sender info
     }
 
-    const ackedIds: number[] = [];
+    const now = Date.now();
+
+    // Expire stale pending pushes so they can be re-delivered if Claude never replied
+    for (const [id, pushedAt] of pendingPushTimes) {
+      if (now - pushedAt > MAX_PENDING_MS) {
+        // Safety net: unconditionally ACK very old messages to prevent infinite loop
+        try { await brokerFetch("/ack-message", { message_ids: [id] }); } catch { /* ok */ }
+        pendingAckIds.delete(id);
+        pendingPushTimes.delete(id);
+      } else if (now - pushedAt > REPUSH_TIMEOUT_MS) {
+        // No reply within window — allow re-push on next poll
+        pendingAckIds.delete(id);
+        pendingPushTimes.delete(id);
+        log(`Re-queuing message ${id} for re-push (no reply within ${REPUSH_TIMEOUT_MS}ms)`);
+      }
+    }
 
     for (const msg of newMessages) {
       const sender = peerMap.get(msg.from_id);
@@ -447,23 +479,11 @@ async function pollAndPushMessages() {
         },
       });
 
-      ackedIds.push(msg.id);
+      // Deferred ACK: track push time. ACK happens on send_message (reply detected)
+      // or after REPUSH_TIMEOUT_MS (re-push) or MAX_PENDING_MS (safety net).
+      pendingAckIds.add(msg.id);
+      pendingPushTimes.set(msg.id, now);
       log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
-    }
-
-    // Track pending ACKs to prevent duplicate notifications on next poll
-    for (const id of ackedIds) pendingAckIds.add(id);
-
-    // ACK delivered messages so they don't appear in future polls
-    if (ackedIds.length > 0) {
-      try {
-        await brokerFetch("/ack-message", { message_ids: ackedIds });
-        // Clear from dedup set after successful ACK
-        for (const id of ackedIds) pendingAckIds.delete(id);
-      } catch {
-        // Will retry on next poll cycle — messages stay in pendingAckIds
-        // to prevent duplicate notifications
-      }
     }
   } catch (e) {
     // Broker might be down temporarily, don't crash

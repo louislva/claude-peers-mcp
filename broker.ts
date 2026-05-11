@@ -466,7 +466,8 @@ function handleVacuum(): { ok: boolean; size_before: string; size_after: string;
 // --- Generate peer ID ---
 
 function generateId(): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  // Exclude visually ambiguous chars: 0/o, 1/l/i — prevents misreads on mobile
+  const chars = "abcdefghjkmnpqrstuvwxyz23456789";
   let id = "";
   for (let i = 0; i < 8; i++) {
     id += chars[Math.floor(Math.random() * chars.length)];

@@ -279,6 +279,22 @@ function formatBrokerMessage(msg: Message, fromPeer?: Peer): string {
 }
 
 // ---------------------------------------------------------------------------
+// Fuzzy peer lookup (handles lookalike chars typed on mobile)
+// ---------------------------------------------------------------------------
+
+/** Normalize a peer ID for fuzzy comparison: 0→o, 1→l, i→l */
+function normalizeId(id: string): string {
+  return id.toLowerCase().replace(/0/g, "o").replace(/[1i]/g, "l");
+}
+
+function findPeer(peers: Peer[], mention: string): Peer | null {
+  const exact = peers.find((p) => p.id === mention);
+  if (exact) return exact;
+  const norm = normalizeId(mention);
+  return peers.find((p) => normalizeId(p.id) === norm) ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // Default target heuristic
 // ---------------------------------------------------------------------------
 
@@ -340,9 +356,11 @@ const HELP_TEXT = `<b>Telegram ↔ Claude commands</b>
 
 <code>/say &lt;text&gt;</code> — send to the active Claude target
 <code>/say @&lt;peer-id&gt; &lt;text&gt;</code> — send to a specific peer
-<code>/peers</code> — list active Claude peers
+<code>/peers</code> — list active Claude peers (numbered, ★ = active target)
 <code>/target @&lt;peer-id&gt;</code> — set the default /say target
+<code>/target &lt;number&gt;</code> — set target by /peers index (e.g. /target 2)
 <code>/target</code> — show the current active target
+<code>/ping</code> — test end-to-end delivery to the active target
 <code>/help</code> — this message`;
 
 async function main(): Promise<void> {
@@ -516,7 +534,7 @@ async function handleCommand(
       return HELP_TEXT;
 
     case "/peers":
-      return formatPeerList(peers, runner.id ?? BRIDGE_EXTERNAL_ID);
+      return formatPeerList(peers, runner.id ?? BRIDGE_EXTERNAL_ID, state.active_target);
 
     case "/target":
       return handleTarget(parsed, peers, runner.id ?? BRIDGE_EXTERNAL_ID, state);
@@ -524,19 +542,24 @@ async function handleCommand(
     case "/say":
       return await handleSay(parsed, peers, runner, state);
 
+    case "/ping":
+      return await handlePing(peers, runner, state);
+
     default:
       return `Unknown command: ${escapeHtml(parsed.cmd)}\nTry /help`;
   }
 }
 
-function formatPeerList(peers: Peer[], bridgePeerId: string): string {
+function formatPeerList(peers: Peer[], bridgePeerId: string, activeTarget: string | null): string {
   const others = peers.filter((p) => p.id !== bridgePeerId);
   if (others.length === 0) {
     return "(no other Claude peers registered)";
   }
-  const lines = others.map((p) => {
+  const lines = others.map((p, i) => {
     const summary = p.summary?.trim() || p.cwd || "(no summary)";
-    return `<code>${escapeHtml(p.id)}</code> · ${escapeHtml(summary)}`;
+    const tty = p.tty ? ` [${p.tty}]` : "";
+    const star = p.id === activeTarget ? " ★" : "";
+    return `${i + 1}. <code>${escapeHtml(p.id)}</code>${tty}${star}\n   ${escapeHtml(summary)}`;
   });
   return `<b>Active peers</b>\n${lines.join("\n")}`;
 }
@@ -547,22 +570,37 @@ function handleTarget(
   bridgePeerId: string,
   state: BridgeState
 ): string {
-  if (!parsed.targetMention) {
+  // Accept peer ID with or without leading @, or a 1-based index from /peers
+  const mention = parsed.targetMention ?? (parsed.arg.trim() || null);
+  if (!mention) {
     if (state.active_target) {
-      return `Active target: <code>${escapeHtml(state.active_target)}</code>`;
+      const peer = peers.find((p) => p.id === state.active_target);
+      const summary = peer?.summary?.trim() || peer?.cwd || "";
+      return `Active target: <code>${escapeHtml(state.active_target)}</code>${summary ? `\n${escapeHtml(summary)}` : ""}`;
     }
     const fallback = pickDefaultTarget(peers, bridgePeerId);
     return fallback
       ? `No explicit target set. Default would be <code>${escapeHtml(fallback.id)}</code> (most recently active).`
       : `No active target set, and no other Claude peers are currently registered.`;
   }
-  const found = peers.find((p) => p.id === parsed.targetMention);
+
+  // Numeric index (e.g. /target 2)
+  const others = peers.filter((p) => p.id !== bridgePeerId);
+  const idx = /^\d+$/.test(mention) ? parseInt(mention, 10) - 1 : -1;
+  let found: Peer | null = null;
+  if (idx >= 0 && idx < others.length) {
+    found = others[idx]!;
+  } else {
+    found = findPeer(peers, mention);
+  }
+
   if (!found) {
-    return `Peer <code>${escapeHtml(parsed.targetMention)}</code> is not registered. Use /peers to list active peers.`;
+    return `Peer <code>${escapeHtml(mention)}</code> is not registered. Use /peers to list active peers.`;
   }
   state.active_target = found.id;
   saveState(state);
-  return `Active target set to <code>${escapeHtml(found.id)}</code>.`;
+  const summary = found.summary?.trim() || found.cwd || "";
+  return `Active target set to <code>${escapeHtml(found.id)}</code>${summary ? `\n${escapeHtml(summary)}` : ""}`;
 }
 
 async function handleSay(
@@ -579,7 +617,7 @@ async function handleSay(
   let target: Peer | null = null;
 
   if (parsed.targetMention) {
-    target = peers.find((p) => p.id === parsed.targetMention) ?? null;
+    target = findPeer(peers, parsed.targetMention);
     if (!target) {
       return `Peer <code>${escapeHtml(parsed.targetMention)}</code> is not registered. Use /peers to list active peers.`;
     }
@@ -606,7 +644,40 @@ async function handleSay(
   if (!result.ok) {
     return `⚠️ send failed: ${escapeHtml(result.error ?? "unknown error")}`;
   }
-  return `→ <code>${escapeHtml(target.id)}</code>`;
+  const summary = target.summary?.trim() || target.cwd || "";
+  return `→ <code>${escapeHtml(target.id)}</code>${summary ? `\n${escapeHtml(summary)}` : ""}`;
+}
+
+async function handlePing(
+  peers: Peer[],
+  runner: BridgeRunner,
+  state: BridgeState
+): Promise<string> {
+  const bridgeId = runner.id ?? BRIDGE_EXTERNAL_ID;
+  const target = state.active_target
+    ? (peers.find((p) => p.id === state.active_target) ?? null)
+    : pickDefaultTarget(peers, bridgeId);
+
+  if (!target) {
+    return "No active target for /ping. Set one with /target @peer-id first.";
+  }
+
+  const t0 = Date.now();
+  const sent = await runner.send({
+    toId: target.id,
+    text: "🏓 ping from Telegram — reply with send_message to confirm delivery",
+    msgType: "ping",
+  });
+  if (!sent.ok) {
+    return `⚠️ ping failed: ${escapeHtml(sent.error ?? "unknown")}`;
+  }
+  const ms = Date.now() - t0;
+  const summary = target.summary?.trim() || target.cwd || "";
+  return (
+    `🏓 ping → <code>${escapeHtml(target.id)}</code> (broker accepted in ${ms}ms)` +
+    (summary ? `\n${escapeHtml(summary)}` : "") +
+    `\nA reply from Claude will appear here when the channel push surfaces.`
+  );
 }
 
 // ---------------------------------------------------------------------------
