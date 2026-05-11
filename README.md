@@ -95,17 +95,20 @@ This replaces the temp-file approach from GSD v1 where session state was scatter
 ### 1. Install
 
 ```bash
-git clone https://github.com/Ecko95/claude-peers-mcp.git ~/gsd-comms-mcp   # or wherever you like
+git clone https://github.com/Ecko95/gsd-comms-mcp.git ~/gsd-comms-mcp   # or wherever you like
 cd ~/gsd-comms-mcp
-bun install
+./install.sh           # checks bun + claude CLI, bun install, registers MCP at user scope
 ```
 
-### 2. Register the MCP server
+`install.sh` is idempotent — re-run any time. After updating the repo (`git pull`), run `./install.sh reset` to bounce the running broker so it picks up the new code. See `./install.sh help` for all subcommands (`install`, `reset`, `status`, `uninstall`).
 
-This makes gsd-comms available in every Claude Code session, from any directory:
+### 2. Register manually (alternative)
+
+If you'd rather skip the script:
 
 ```bash
-claude mcp add --scope user --transport stdio gsd-comms -- bun ~/gsd-comms-mcp/server.ts
+bun install
+claude mcp add --scope user --transport stdio claude-peers -- bun ~/gsd-comms-mcp/server.ts
 ```
 
 Replace `~/gsd-comms-mcp` with wherever you cloned it.
