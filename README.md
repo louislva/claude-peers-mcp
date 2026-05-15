@@ -1,6 +1,6 @@
 # claude-peers
 
-Let your Claude Code instances find each other and talk. When you're running 5 sessions across different projects, any Claude can discover the others and send messages that arrive instantly.
+Let your Claude Code and Codex instances find each other and talk. When you're running 5 sessions across different projects, any peer can discover the others and send messages through a local broker.
 
 ```
   Terminal 1 (poker-engine)          Terminal 2 (eel)
@@ -57,20 +57,29 @@ It'll show every running instance with their working directory, git repo, and a 
 
 > Send a message to peer [id]: "what are you working on?"
 
-The other Claude receives it immediately and responds.
+Claude peers receive through the Claude channel path. Codex peers receive automatically on their next prompt when the Codex hook is installed; without that hook they use `check_messages`.
 
-## What Claude can do
+## What peers can do
 
 | Tool             | What it does                                                                   |
 | ---------------- | ------------------------------------------------------------------------------ |
-| `list_peers`     | Find other Claude Code instances — scoped to `machine`, `directory`, or `repo` |
-| `send_message`   | Send a message to another instance by ID (arrives instantly via channel push)  |
+| `list_peers`     | Find other Claude/Codex peers — scoped to `machine`, `directory`, or `repo`    |
+| `send_message`   | Send a message to another peer by ID                                           |
 | `set_summary`    | Describe what you're working on (visible to other peers)                       |
-| `check_messages` | Manually check for messages (fallback if not using channel mode)               |
+| `check_messages` | Manually check for messages (fallback and Codex-without-hook path)             |
+
+## Delivery matrix
+
+| Receiver | Mode shown in `list_peers` | Delivery behavior |
+| --- | --- | --- |
+| Claude Code with channel | `claude/claude-channel` | Best-effort channel push plus tool-response/check fallback |
+| Codex with hook installed and recently run | `codex/codex-hook` | Drains pending messages into the next `UserPromptSubmit` turn |
+| Codex without hook or stale hook | `codex/manual-drain` | Message stays queued until `check_messages` or hook install |
+| Unknown client | `unknown/unknown` | Manual `check_messages` fallback |
 
 ## How it works
 
-A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code session spawns an MCP server that registers with the broker and polls for messages every second. Inbound messages are pushed into the session via the [claude/channel](https://code.claude.com/docs/en/channels-reference) protocol, so Claude sees them immediately.
+A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code or Codex session spawns an MCP server that registers with the broker and polls for messages every second. Inbound messages for Claude are pushed into the session via the [claude/channel](https://code.claude.com/docs/en/channels-reference) protocol. Codex does not render Claude channel notifications, so Codex uses a `UserPromptSubmit` hook that claims pending messages, emits them as additional prompt context, and ACKs the broker after writing the hook output.
 
 ```
                     ┌───────────────────────────┐
@@ -81,10 +90,20 @@ A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude
                       MCP server A    MCP server B
                       (stdio)         (stdio)
                            │               │
-                      Claude A         Claude B
+                      Claude A         Claude B / Codex B
 ```
 
 The broker auto-launches when the first session starts. It cleans up dead peers automatically. Everything is localhost-only.
+
+## Codex hook install
+
+The repo includes a Codex `UserPromptSubmit` hook at `.codex/hooks.json` for sessions launched from this repo. For another repo, install without overwriting existing hooks:
+
+```bash
+bun /home/manzo/claude-peers-mcp/bin/install-codex-hook.ts /path/to/repo
+```
+
+The installer merges the hook into `.codex/hooks.json`, writes a timestamped backup if one already exists, and is idempotent.
 
 ## Auto-summary
 

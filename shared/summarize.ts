@@ -1,71 +1,44 @@
 /**
- * Generate a 1-2 sentence summary of what a Claude Code instance is likely
- * working on, based on its working directory and git context.
+ * Generate a 1-2 sentence summary of what a Claude Code instance is working on.
  *
- * Uses OpenAI's gpt-5.4-nano for cheap, fast inference.
- * Requires OPENAI_API_KEY environment variable.
- * Falls back gracefully if unavailable.
+ * Deterministic — derives the summary from git context with no network calls,
+ * no API keys, and no failure modes. Returns null only if every input is empty.
+ *
+ * Replaces the previous Anthropic API integration (PR #25-era code that called
+ * Claude Haiku for the same purpose). The AI version added an external dependency,
+ * a billing surface, a CWD/git-branch privacy leak to api.anthropic.com, and a
+ * silent-failure path on bad API responses — all for a 1-line label that doesn't
+ * need intelligence.
  */
 
-export async function generateSummary(context: {
+import { basename } from "node:path";
+
+export function generateSummary(context: {
   cwd: string;
   git_root: string | null;
   git_branch?: string | null;
   recent_files?: string[];
-}): Promise<string | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return null;
+}): string | null {
+  const project = basename(context.git_root || context.cwd);
+  // Return null rather than an empty string when the path resolves to something
+  // basename() can't extract (e.g. "/" or ""). Callers use `if (summary)` so
+  // both null and "" would be treated as absent, but the return type says
+  // `string | null` — honor it literally.
+  if (!project) return null;
+  const parts = [project];
+
+  if (context.git_branch && context.git_branch !== "main" && context.git_branch !== "master") {
+    parts.push(`(${context.git_branch})`);
   }
 
-  const parts = [`Working directory: ${context.cwd}`];
-  if (context.git_root) {
-    parts.push(`Git repo root: ${context.git_root}`);
-  }
-  if (context.git_branch) {
-    parts.push(`Branch: ${context.git_branch}`);
-  }
   if (context.recent_files && context.recent_files.length > 0) {
-    parts.push(`Recently modified files: ${context.recent_files.join(", ")}`);
-  }
-
-  try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-5.4-nano",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You generate brief summaries of what a developer is working on based on their project context. Respond with exactly 1-2 sentences, no more. Be specific about the project name and likely task.",
-          },
-          {
-            role: "user",
-            content: `Based on this context, what is this developer likely working on?\n\n${parts.join("\n")}`,
-          },
-        ],
-        max_tokens: 100,
-        temperature: 0.3,
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!res.ok) {
-      return null;
+    parts.push(`— editing ${context.recent_files[0]}`);
+    if (context.recent_files.length > 1) {
+      parts.push(`+${context.recent_files.length - 1}`);
     }
-
-    const data = (await res.json()) as {
-      choices: Array<{ message: { content: string } }>;
-    };
-    return data.choices[0]?.message?.content?.trim() ?? null;
-  } catch {
-    return null;
   }
+
+  return parts.join(" ");
 }
 
 /**
