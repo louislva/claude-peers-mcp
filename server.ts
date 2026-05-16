@@ -138,6 +138,7 @@ function getTty(): string | null {
 let myId: PeerId | null = null;
 let myCwd = process.cwd();
 let myGitRoot: string | null = null;
+let myTty: string | null = null;
 
 // --- MCP Server ---
 
@@ -159,6 +160,7 @@ Available tools:
 - send_message: Send a message to another instance by ID
 - set_summary: Set a 1-2 sentence summary of what you're working on (visible to other peers)
 - check_messages: Manually check for new messages
+- self_info: Get your own peer identity (id, pid, cwd, tty). list_peers excludes you, so use this to introspect yourself.
 
 When you start, proactively call set_summary to describe what you're working on. This helps other instances understand your context.`,
   }
@@ -222,6 +224,15 @@ const TOOLS = [
     name: "check_messages",
     description:
       "Manually check for new messages from other Claude Code instances. Messages are normally pushed automatically via channel notifications, but you can use this as a fallback.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "self_info",
+    description:
+      "Return your own peer identity: id, MCP-server pid, cwd, git root, tty. Useful because list_peers excludes the caller, so a session that needs to identify itself in a conversation (e.g., a coordinator that needs to write its own peer id into a worker's brief) cannot find itself via list_peers alone.",
     inputSchema: {
       type: "object" as const,
       properties: {},
@@ -394,6 +405,25 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
 
+    case "self_info": {
+      if (!myId) {
+        return {
+          content: [{ type: "text" as const, text: "Not registered with broker yet" }],
+          isError: true,
+        };
+      }
+      const lines = [
+        `ID: ${myId}`,
+        `MCP server PID: ${process.pid}`,
+        `CWD: ${myCwd}`,
+      ];
+      if (myGitRoot) lines.push(`Git root: ${myGitRoot}`);
+      if (myTty) lines.push(`TTY: ${myTty}`);
+      return {
+        content: [{ type: "text" as const, text: lines.join("\n") }],
+      };
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -457,11 +487,11 @@ async function main() {
   // 2. Gather context
   myCwd = process.cwd();
   myGitRoot = await getGitRoot(myCwd);
-  const tty = getTty();
+  myTty = getTty();
 
   log(`CWD: ${myCwd}`);
   log(`Git root: ${myGitRoot ?? "(none)"}`);
-  log(`TTY: ${tty ?? "(unknown)"}`);
+  log(`TTY: ${myTty ?? "(unknown)"}`);
 
   // 3. Generate initial summary via gpt-5.4-nano (non-blocking, best-effort)
   let initialSummary = "";
@@ -492,7 +522,7 @@ async function main() {
     pid: process.pid,
     cwd: myCwd,
     git_root: myGitRoot,
-    tty,
+    tty: myTty,
     summary: initialSummary,
   });
   myId = reg.id;
@@ -521,6 +551,14 @@ async function main() {
 
   // 7. Start heartbeat
   const heartbeatTimer = setInterval(async () => {
+    // Orphan detection: if our Claude Code parent exited, we were reparented
+    // to init/launchd (PPID=1) and would otherwise keep advertising liveness
+    // to the broker indefinitely. Unregister and exit cleanly instead.
+    if (process.ppid === 1) {
+      log("Parent exited (PPID=1) — orphaned, cleaning up");
+      await cleanup();
+      return;
+    }
     if (myId) {
       try {
         await brokerFetch("/heartbeat", { id: myId });
