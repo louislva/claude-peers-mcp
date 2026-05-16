@@ -521,6 +521,14 @@ async function main() {
 
   // 7. Start heartbeat
   const heartbeatTimer = setInterval(async () => {
+    // Orphan detection: if our Claude Code parent exited, we were reparented
+    // to init/launchd (PPID=1) and would otherwise keep advertising liveness
+    // to the broker indefinitely. Unregister and exit cleanly instead.
+    if (process.ppid === 1) {
+      log("Parent exited (PPID=1) — orphaned, cleaning up");
+      await cleanup();
+      return;
+    }
     if (myId) {
       try {
         await brokerFetch("/heartbeat", { id: myId });
