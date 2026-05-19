@@ -370,6 +370,19 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             content: [{ type: "text" as const, text: "No new messages." }],
           };
         }
+        // Ack immediately — the LLM definitionally receives these messages
+        // in the tool response, so we can mark them delivered without
+        // waiting for further confirmation. Failure is non-critical: an
+        // unacked message simply gets re-returned on the next call.
+        try {
+          await brokerFetch("/ack-messages", {
+            id: myId,
+            message_ids: result.messages.map((m) => m.id),
+          });
+        } catch {
+          // Best-effort; messages will be redelivered on next poll if ack
+          // never reaches the broker (at-least-once semantics).
+        }
         const lines = result.messages.map(
           (m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`
         );
@@ -407,6 +420,11 @@ async function pollAndPushMessages() {
   try {
     const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
 
+    // Track messages we successfully pushed. Only these get acked; messages
+    // whose push throws stay delivered=0 in the broker and will be retried
+    // on the next poll cycle after the broker's POLL_LEASE_SECONDS expires.
+    const acked: number[] = [];
+
     for (const msg of result.messages) {
       // Look up the sender's info for context
       let fromSummary = "";
@@ -426,21 +444,46 @@ async function pollAndPushMessages() {
         // Non-critical, proceed without sender info
       }
 
-      // Push as channel notification — this is what makes it immediate
-      await mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content: msg.text,
-          meta: {
-            from_id: msg.from_id,
-            from_summary: fromSummary,
-            from_cwd: fromCwd,
-            sent_at: msg.sent_at,
+      try {
+        // Push as channel notification — this is what makes it immediate
+        await mcp.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: msg.text,
+            meta: {
+              from_id: msg.from_id,
+              from_summary: fromSummary,
+              from_cwd: fromCwd,
+              sent_at: msg.sent_at,
+            },
           },
-        },
-      });
+        });
+        acked.push(msg.id);
+        log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+      } catch (pushErr) {
+        log(
+          `Push failed for msg ${msg.id} (will retry after lease expires): ${
+            pushErr instanceof Error ? pushErr.message : String(pushErr)
+          }`,
+        );
+        // Don't ack — broker will return this message again on a future poll
+        // once polled_at is older than POLL_LEASE_SECONDS.
+      }
+    }
 
-      log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+    // Ack only what we successfully pushed. Ack failure is non-critical (the
+    // worst case is one redelivery to the LLM, which is acceptable under
+    // at-least-once semantics).
+    if (acked.length > 0) {
+      try {
+        await brokerFetch("/ack-messages", { id: myId, message_ids: acked });
+      } catch (ackErr) {
+        log(
+          `Ack failed for ${acked.length} message(s), may redeliver: ${
+            ackErr instanceof Error ? ackErr.message : String(ackErr)
+          }`,
+        );
+      }
     }
   } catch (e) {
     // Broker might be down temporarily, don't crash
