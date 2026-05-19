@@ -173,6 +173,19 @@ const selectPollable = db.prepare(`
   ORDER BY sent_at ASC
 `);
 
+const selectAllUndelivered = db.prepare(`
+  SELECT * FROM messages
+  WHERE delivered = 0
+  ORDER BY sent_at ASC
+`);
+
+const selectAllPollable = db.prepare(`
+  SELECT * FROM messages
+  WHERE delivered = 0
+    AND (polled_at IS NULL OR polled_at < ?)
+  ORDER BY sent_at ASC
+`);
+
 const markPolled = db.prepare(`
   UPDATE messages SET polled_at = ? WHERE id = ?
 `);
@@ -268,6 +281,15 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
 }
 
 function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
+  // Passive observers (for example the AgentBridgeMirror sidecar) need to see
+  // inter-peer traffic without changing the delivery state. They intentionally
+  // do not claim polled_at; claiming the shared lease could hide the message
+  // from the real recipient for POLL_LEASE_SECONDS.
+  if (body.subscribe_all && body.read_only) {
+    const messages = selectAllUndelivered.all() as Message[];
+    return { messages };
+  }
+
   // Backwards-compat path: legacy clients that don't implement /ack-messages
   // pass ack_supported=undefined. For them we retain the original
   // mark-delivered-on-poll behavior so a broker upgrade doesn't trigger a
@@ -292,7 +314,9 @@ function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   const now = new Date().toISOString();
 
   const messages = db.transaction(() => {
-    const msgs = selectPollable.all(body.id, cutoff) as Message[];
+    const msgs = body.subscribe_all
+      ? (selectAllPollable.all(cutoff) as Message[])
+      : (selectPollable.all(body.id, cutoff) as Message[]);
     for (const msg of msgs) {
       markPolled.run(now, msg.id);
     }

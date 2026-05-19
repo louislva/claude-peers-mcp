@@ -188,6 +188,28 @@ try {
   );
   console.log();
 
+  // --- Test 9: read-only subscribe_all observes without consuming recipient delivery ---
+  console.log("[test 9] read-only subscribe_all observes inter-peer messages without consuming");
+  await fetchJson("/send-message", { from_id: sender.id, to_id: recipient.id, text: "observed-6" });
+  const observerPoll = await fetchJson<PollResp>("/poll-messages", {
+    id: sender.id,
+    ack_supported: true,
+    subscribe_all: true,
+    read_only: true,
+  });
+  assert(observerPoll.messages.length >= 1, "read-only subscribe_all returns undelivered messages");
+  assert(
+    observerPoll.messages.some((message) => message.text === "observed-6" && message.to_id === recipient.id),
+    "observer saw sender-to-recipient message",
+  );
+  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id, ack_supported: true });
+  assert(res.messages.some((message) => message.text === "observed-6"), "recipient still receives observed message");
+  await fetchJson<{ ok: boolean }>("/ack-messages", {
+    id: recipient.id,
+    message_ids: res.messages.filter((message) => message.text === "observed-6").map((message) => message.id),
+  });
+  console.log();
+
   console.log("---");
   console.log(`Result: ${passed} passed, ${failed} failed`);
   process.exit(failed > 0 ? 1 : 0);

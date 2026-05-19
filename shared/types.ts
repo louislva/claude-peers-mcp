@@ -71,6 +71,18 @@ export interface PollMessagesRequest {
    * old MCP server subprocesses outlive a broker upgrade.
    */
   ack_supported?: boolean;
+  /**
+   * Passive observer mode used by bridge sidecars. When true with
+   * read_only=true, the broker returns messages across peers instead of only
+   * messages addressed to id.
+   */
+  subscribe_all?: boolean;
+  /**
+   * Read-only polls never mark messages delivered and never claim the shared
+   * polled_at lease. This lets observers mirror traffic without stealing it
+   * from the actual recipient.
+   */
+  read_only?: boolean;
 }
 
 export interface PollMessagesResponse {
