@@ -91,12 +91,12 @@ try {
   const msgId = res.messages[0]!.id;
 
   const db = new Database(TEST_DB, { readonly: true });
-  let row = db.query("SELECT delivered, polled_at FROM messages WHERE id = ?").get(msgId) as {
-    delivered: number;
-    polled_at: string | null;
-  };
-  assert(row.delivered === 0, "message is NOT marked delivered after poll");
-  assert(row.polled_at !== null, "message IS marked polled_at after poll");
+  const row = db.query("SELECT delivered, polled_at FROM messages WHERE id = ?").get(msgId) as
+    | { delivered: number; polled_at: string | null }
+    | null;
+  assert(row !== null, "row visible from a separate readonly connection");
+  assert(row?.delivered === 0, "message is NOT marked delivered after poll");
+  assert(row?.polled_at !== null, "message IS marked polled_at after poll");
   db.close();
   console.log();
 

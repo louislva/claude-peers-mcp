@@ -32,6 +32,12 @@ const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peer
 // deliver within ms, so 60s leaves room for slow LLM consumption.
 const POLL_LEASE_SECONDS = 60;
 
+// How long after first poll a never-acked message is force-marked delivered.
+// Bounds noise from MCP server clients that don't implement /ack-messages
+// (e.g., older subprocess versions during a rollout). Without this, an old
+// client's messages would re-poll every POLL_LEASE_SECONDS forever.
+const FORCE_DELIVERED_SECONDS = 3600; // 1 hour
+
 // --- Database setup ---
 
 const db = new Database(DB_PATH);
@@ -98,6 +104,26 @@ cleanStalePeers();
 
 // Periodically clean stale peers (every 30s)
 setInterval(cleanStalePeers, 30_000);
+
+// Force-deliver messages that have been polled but never acked for too long.
+// Protects against old MCP server clients that don't call /ack-messages —
+// without this, their messages would loop in the polled-not-acked state
+// forever. Runs every 5 minutes.
+function forceDeliverStuck() {
+  const cutoff = new Date(Date.now() - FORCE_DELIVERED_SECONDS * 1000).toISOString();
+  const result = db.run(
+    "UPDATE messages SET delivered = 1 WHERE delivered = 0 AND polled_at IS NOT NULL AND polled_at < ?",
+    [cutoff],
+  );
+  if (result.changes > 0) {
+    console.error(
+      `[claude-peers broker] force-delivered ${result.changes} stuck message(s) (polled > ${FORCE_DELIVERED_SECONDS}s ago)`,
+    );
+  }
+}
+
+forceDeliverStuck();
+setInterval(forceDeliverStuck, 300_000); // every 5 min
 
 // --- Prepared statements ---
 
