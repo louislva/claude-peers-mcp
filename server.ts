@@ -548,8 +548,13 @@ async function main() {
   await mcp.connect(new StdioServerTransport());
   log("MCP connected");
 
-  // 6. Start polling for inbound messages
-  const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
+  // 6. Start polling for inbound messages (only when channel push is available).
+  // Channel:no peers must retrieve messages manually via check_messages. If we
+  // ran the poll loop anyway, /poll-messages would mark every message delivered=1
+  // then drop the mcp.notification() silently — permanently consuming the queue.
+  const pollTimer = channelLoaded
+    ? setInterval(pollAndPushMessages, POLL_INTERVAL_MS)
+    : null;
 
   // 7. Start heartbeat (also drains a deferred capability post if one is pending)
   const heartbeatTimer = setInterval(async () => {
@@ -567,7 +572,7 @@ async function main() {
 
   // 8. Clean up on exit
   const cleanup = async () => {
-    clearInterval(pollTimer);
+    if (pollTimer) clearInterval(pollTimer);
     clearInterval(heartbeatTimer);
     if (myId) {
       try {

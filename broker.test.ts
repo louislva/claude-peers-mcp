@@ -123,6 +123,54 @@ describe("/set-capability", () => {
   });
 });
 
+describe("message queuing for Channel:no peers", () => {
+  // Regression test for the bug where pollAndPushMessages() consumed messages
+  // via /poll-messages (marking delivered=1) then silently dropped the
+  // mcp.notification() for peers whose channel_loaded=false. Messages were
+  // permanently lost; check_messages found nothing.
+  //
+  // The fix: server.ts only starts the push loop when channelLoaded=true.
+  // Channel:no peers rely solely on check_messages → /poll-messages.
+  // This test verifies that messages sent to a Channel:no peer ARE returned
+  // by /poll-messages when explicitly called (i.e. the broker queues correctly
+  // and marks delivered only at poll time, not before).
+
+  test("messages to Channel:no peer survive until explicitly polled via check_messages", async () => {
+    const sender = await brokerPost<RegisterResponse>("/register", {
+      pid: process.pid,
+      cwd: "/tmp/test-sender",
+      git_root: null,
+      tty: null,
+      summary: "channel-yes sender",
+    });
+    await brokerPost("/set-capability", { id: sender.id, channel_loaded: true });
+
+    const receiver = await brokerPost<RegisterResponse>("/register", {
+      pid: process.pid + 1,
+      cwd: "/tmp/test-receiver",
+      git_root: null,
+      tty: null,
+      summary: "channel-no receiver",
+    });
+    // receiver stays channel_loaded=false (the default — no set-capability call)
+
+    // Send two messages from sender to receiver
+    await brokerPost("/send-message", { from_id: sender.id, to_id: receiver.id, text: "hello from sender 1" });
+    await brokerPost("/send-message", { from_id: sender.id, to_id: receiver.id, text: "hello from sender 2" });
+
+    // Without the push loop running (Channel:no), messages must still be in the queue.
+    // Polling via /poll-messages (what check_messages calls) should return them.
+    const polled = await brokerPost<{ messages: Array<{ text: string }> }>("/poll-messages", { id: receiver.id });
+    expect(polled.messages).toHaveLength(2);
+    expect(polled.messages.map((m) => m.text)).toContain("hello from sender 1");
+    expect(polled.messages.map((m) => m.text)).toContain("hello from sender 2");
+
+    // A second poll returns nothing (marked delivered=1 on first poll).
+    const polled2 = await brokerPost<{ messages: Array<{ text: string }> }>("/poll-messages", { id: receiver.id });
+    expect(polled2.messages).toHaveLength(0);
+  });
+});
+
 describe("schema migration", () => {
   // Pre-existing DBs (from versions before this PR) lack channel_loaded.
   // Verify the broker's PRAGMA-guarded ALTER TABLE adds it on startup
