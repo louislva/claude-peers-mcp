@@ -364,7 +364,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         };
       }
       try {
-        const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+        const result = await brokerFetch<PollMessagesResponse>("/poll-messages", {
+          id: myId,
+          ack_supported: true,
+        });
         if (result.messages.length === 0) {
           return {
             content: [{ type: "text" as const, text: "No new messages." }],
@@ -418,7 +421,13 @@ async function pollAndPushMessages() {
   if (!myId) return;
 
   try {
-    const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+    // ack_supported=true opts into the broker's new at-least-once delivery
+    // semantics: messages stay un-acked until we successfully push them
+    // and call /ack-messages. See broker.ts handlePollMessages.
+    const result = await brokerFetch<PollMessagesResponse>("/poll-messages", {
+      id: myId,
+      ack_supported: true,
+    });
 
     // Track messages we successfully pushed. Only these get acked; messages
     // whose push throws stay delivered=0 in the broker and will be retried

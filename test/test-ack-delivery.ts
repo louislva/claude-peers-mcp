@@ -93,7 +93,7 @@ try {
   // --- Test 1: poll without ack does NOT consume the message ---
   console.log("[test 1] poll without ack does NOT consume the message");
   await fetchJson("/send-message", { from_id: sender.id, to_id: recipient.id, text: "msg-1" });
-  let res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id });
+  let res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id, ack_supported: true });
   assert(res.messages.length === 1, "first poll returns 1 message");
   assert(res.messages[0]?.text === "msg-1", "message text matches");
   const msgId = res.messages[0]!.id;
@@ -101,7 +101,7 @@ try {
 
   // --- Test 2: re-poll within lease window returns nothing (polled_at set) ---
   console.log("[test 2] re-poll within lease window returns 0");
-  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id });
+  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id, ack_supported: true });
   assert(res.messages.length === 0, "re-poll within 60s lease returns 0 messages");
   console.log();
 
@@ -112,14 +112,14 @@ try {
     message_ids: [msgId],
   });
   // Force the broker to consider it pollable again by waiting 0 time and re-polling — should still be 0 (delivered=1)
-  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id });
+  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id, ack_supported: true });
   assert(res.messages.length === 0, "acked message no longer pollable");
   console.log();
 
   // --- Test 4: cross-peer ack denied (defense in depth) ---
   console.log("[test 4] cross-peer ack does NOT mark delivered");
   await fetchJson("/send-message", { from_id: sender.id, to_id: recipient.id, text: "msg-2" });
-  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id });
+  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id, ack_supported: true });
   assert(res.messages.length === 1, "fresh msg-2 polled by recipient");
   const msg2Id = res.messages[0]!.id;
   // sender (not recipient) tries to ack msg2 — should be a no-op
@@ -128,7 +128,7 @@ try {
   // Simpler: recipient acks correctly, then re-poll shows 0. The cross-peer test passes iff the recipient's
   // subsequent ack is what produced the "delivered=1" state, not the sender's incorrect ack.
   await fetchJson<{ ok: boolean }>("/ack-messages", { id: recipient.id, message_ids: [msg2Id] });
-  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id });
+  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id, ack_supported: true });
   assert(
     res.messages.length === 0,
     "correct-peer ack stops delivery (and previous cross-peer ack was a no-op)",
@@ -149,19 +149,43 @@ try {
   await fetchJson("/send-message", { from_id: sender.id, to_id: recipient.id, text: "msg-3a" });
   await fetchJson("/send-message", { from_id: sender.id, to_id: recipient.id, text: "msg-3b" });
   await fetchJson("/send-message", { from_id: sender.id, to_id: recipient.id, text: "msg-3c" });
-  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id });
+  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id, ack_supported: true });
   assert(res.messages.length === 3, "poll returns 3 fresh messages");
   const ids = res.messages.map((m) => m.id);
   await fetchJson<{ ok: boolean }>("/ack-messages", { id: recipient.id, message_ids: ids });
-  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id });
+  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id, ack_supported: true });
   assert(res.messages.length === 0, "batched ack cleared all 3 in one call");
   console.log();
 
   // --- Test 7: a separate poll-after-send-without-ack still works after multiple cycles ---
   console.log("[test 7] new sends are immediately pollable (lease isolation per message)");
   await fetchJson("/send-message", { from_id: sender.id, to_id: recipient.id, text: "msg-4" });
-  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id });
+  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id, ack_supported: true });
   assert(res.messages.length === 1, "new msg-4 polled (not blocked by prior leases)");
+  // Ack msg-4 so it doesn't interfere with the next test
+  await fetchJson<{ ok: boolean }>("/ack-messages", {
+    id: recipient.id,
+    message_ids: [res.messages[0]!.id],
+  });
+  console.log();
+
+  // --- Test 8: legacy client (no ack_supported) gets the OLD broker behavior ---
+  console.log("[test 8] legacy client without ack_supported gets mark-delivered-on-poll");
+  await fetchJson("/send-message", { from_id: sender.id, to_id: recipient.id, text: "legacy-5" });
+  // Legacy poll: no ack_supported flag → broker uses old code path
+  const legacyPoll = await fetchJson<PollResp>("/poll-messages", { id: recipient.id });
+  assert(legacyPoll.messages.length === 1, "legacy poll returns 1 message");
+  assert(legacyPoll.messages[0]?.text === "legacy-5", "legacy message text matches");
+  // Immediately re-poll with ack_supported=true. Since legacy path marked
+  // delivered=1 atomically, the new-path poll should also see 0.
+  const reCheck = await fetchJson<PollResp>("/poll-messages", {
+    id: recipient.id,
+    ack_supported: true,
+  });
+  assert(
+    reCheck.messages.length === 0,
+    "legacy poll already marked delivered=1 (no re-delivery from new path)",
+  );
   console.log();
 
   console.log("---");

@@ -161,6 +161,10 @@ const insertMessage = db.prepare(`
   VALUES (?, ?, ?, ?, 0)
 `);
 
+const selectUndelivered = db.prepare(`
+  SELECT * FROM messages WHERE to_id = ? AND delivered = 0 ORDER BY sent_at ASC
+`);
+
 const selectPollable = db.prepare(`
   SELECT * FROM messages
   WHERE to_id = ?
@@ -264,13 +268,26 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
 }
 
 function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
-  // Return messages that are not yet acked, AND either never polled OR last
-  // polled more than POLL_LEASE_SECONDS ago. Mark them polled_at = now in
-  // the same transaction so concurrent pollers don't double-deliver.
-  // Messages stay delivered=0 until the MCP server confirms LLM consumption
-  // via /ack-messages — this fixes the silent-loss bug where the prior
-  // implementation marked delivered=1 on poll regardless of whether the
-  // channel notification actually reached the LLM.
+  // Backwards-compat path: legacy clients that don't implement /ack-messages
+  // pass ack_supported=undefined. For them we retain the original
+  // mark-delivered-on-poll behavior so a broker upgrade doesn't trigger a
+  // duplicate-storm against old MCP server subprocesses that outlive it.
+  // The silent-loss bug stays present for those clients until they're
+  // restarted — but it's no worse than before the fix.
+  if (!body.ack_supported) {
+    const messages = selectUndelivered.all(body.id) as Message[];
+    for (const msg of messages) {
+      markDelivered.run(msg.id, body.id);
+    }
+    return { messages };
+  }
+
+  // New ack-aware path: messages stay delivered=0 until the client calls
+  // /ack-messages. Within POLL_LEASE_SECONDS of being polled, a message is
+  // considered "in flight" and not re-returned. After the lease expires
+  // without an ack, the message is re-pollable (at-least-once retry).
+  // markPolled + select happens in one transaction so concurrent pollers
+  // don't double-deliver.
   const cutoff = new Date(Date.now() - POLL_LEASE_SECONDS * 1000).toISOString();
   const now = new Date().toISOString();
 
