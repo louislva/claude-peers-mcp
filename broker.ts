@@ -19,12 +19,24 @@ import type {
   SendMessageRequest,
   PollMessagesRequest,
   PollMessagesResponse,
+  AckMessagesRequest,
   Peer,
   Message,
 } from "./shared/types.ts";
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+
+// How long a polled-but-not-acked message stays "in flight" before being
+// eligible for retry. Set conservatively — push notifications usually
+// deliver within ms, so 60s leaves room for slow LLM consumption.
+const POLL_LEASE_SECONDS = 60;
+
+// How long after first poll a never-acked message is force-marked delivered.
+// Bounds noise from MCP server clients that don't implement /ack-messages
+// (e.g., older subprocess versions during a rollout). Without this, an old
+// client's messages would re-poll every POLL_LEASE_SECONDS forever.
+const FORCE_DELIVERED_SECONDS = 3600; // 1 hour
 
 // --- Database setup ---
 
@@ -58,6 +70,21 @@ db.run(`
   )
 `);
 
+// Idempotent migration: add polled_at column if missing. Tracks when a
+// message was last returned to a polling MCP server, so we can retry
+// after POLL_LEASE_SECONDS if the LLM ack never arrived. Pre-migration
+// behavior of marking delivered=1 on poll caused silent message loss
+// when channel-notification pushes failed.
+{
+  const columns = (db.query("PRAGMA table_info(messages)").all() as { name: string }[]).map(
+    (c) => c.name,
+  );
+  if (!columns.includes("polled_at")) {
+    db.run("ALTER TABLE messages ADD COLUMN polled_at TEXT");
+    console.error("[claude-peers broker] migration: added polled_at column to messages");
+  }
+}
+
 // Clean up stale peers (PIDs that no longer exist) on startup
 function cleanStalePeers() {
   const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
@@ -77,6 +104,26 @@ cleanStalePeers();
 
 // Periodically clean stale peers (every 30s)
 setInterval(cleanStalePeers, 30_000);
+
+// Force-deliver messages that have been polled but never acked for too long.
+// Protects against old MCP server clients that don't call /ack-messages —
+// without this, their messages would loop in the polled-not-acked state
+// forever. Runs every 5 minutes.
+function forceDeliverStuck() {
+  const cutoff = new Date(Date.now() - FORCE_DELIVERED_SECONDS * 1000).toISOString();
+  const result = db.run(
+    "UPDATE messages SET delivered = 1 WHERE delivered = 0 AND polled_at IS NOT NULL AND polled_at < ?",
+    [cutoff],
+  );
+  if (result.changes > 0) {
+    console.error(
+      `[claude-peers broker] force-delivered ${result.changes} stuck message(s) (polled > ${FORCE_DELIVERED_SECONDS}s ago)`,
+    );
+  }
+}
+
+forceDeliverStuck();
+setInterval(forceDeliverStuck, 300_000); // every 5 min
 
 // --- Prepared statements ---
 
@@ -118,8 +165,20 @@ const selectUndelivered = db.prepare(`
   SELECT * FROM messages WHERE to_id = ? AND delivered = 0 ORDER BY sent_at ASC
 `);
 
+const selectPollable = db.prepare(`
+  SELECT * FROM messages
+  WHERE to_id = ?
+    AND delivered = 0
+    AND (polled_at IS NULL OR polled_at < ?)
+  ORDER BY sent_at ASC
+`);
+
+const markPolled = db.prepare(`
+  UPDATE messages SET polled_at = ? WHERE id = ?
+`);
+
 const markDelivered = db.prepare(`
-  UPDATE messages SET delivered = 1 WHERE id = ?
+  UPDATE messages SET delivered = 1 WHERE id = ? AND to_id = ?
 `);
 
 // --- Generate peer ID ---
@@ -209,14 +268,54 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
 }
 
 function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
-  const messages = selectUndelivered.all(body.id) as Message[];
-
-  // Mark them as delivered
-  for (const msg of messages) {
-    markDelivered.run(msg.id);
+  // Backwards-compat path: legacy clients that don't implement /ack-messages
+  // pass ack_supported=undefined. For them we retain the original
+  // mark-delivered-on-poll behavior so a broker upgrade doesn't trigger a
+  // duplicate-storm against old MCP server subprocesses that outlive it.
+  // The silent-loss bug stays present for those clients until they're
+  // restarted — but it's no worse than before the fix.
+  if (!body.ack_supported) {
+    const messages = selectUndelivered.all(body.id) as Message[];
+    for (const msg of messages) {
+      markDelivered.run(msg.id, body.id);
+    }
+    return { messages };
   }
 
+  // New ack-aware path: messages stay delivered=0 until the client calls
+  // /ack-messages. Within POLL_LEASE_SECONDS of being polled, a message is
+  // considered "in flight" and not re-returned. After the lease expires
+  // without an ack, the message is re-pollable (at-least-once retry).
+  // markPolled + select happens in one transaction so concurrent pollers
+  // don't double-deliver.
+  const cutoff = new Date(Date.now() - POLL_LEASE_SECONDS * 1000).toISOString();
+  const now = new Date().toISOString();
+
+  const messages = db.transaction(() => {
+    const msgs = selectPollable.all(body.id, cutoff) as Message[];
+    for (const msg of msgs) {
+      markPolled.run(now, msg.id);
+    }
+    return msgs;
+  })();
+
   return { messages };
+}
+
+function handleAckMessages(body: AckMessagesRequest): { ok: boolean } {
+  if (body.message_ids.length === 0) return { ok: true };
+
+  // Scope the ack to messages addressed to this peer (defense in depth —
+  // a buggy or malicious client can't ack-and-delete messages destined for
+  // other peers).
+  const ack = db.transaction(() => {
+    for (const msgId of body.message_ids) {
+      markDelivered.run(msgId, body.id);
+    }
+  });
+  ack();
+
+  return { ok: true };
 }
 
 function handleUnregister(body: { id: string }): void {
@@ -257,6 +356,8 @@ Bun.serve({
           return Response.json(handleSendMessage(body as SendMessageRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
+        case "/ack-messages":
+          return Response.json(handleAckMessages(body as AckMessagesRequest));
         case "/unregister":
           handleUnregister(body as { id: string });
           return Response.json({ ok: true });

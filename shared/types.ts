@@ -60,8 +60,24 @@ export interface SendMessageRequest {
 
 export interface PollMessagesRequest {
   id: PeerId;
+  /**
+   * Set to true by MCP server clients that implement /ack-messages. When
+   * true, the broker uses the new at-least-once delivery semantics:
+   * messages stay delivered=0 until explicitly acked, with a per-message
+   * polled_at lease that allows retry on push failure. When omitted (old
+   * clients), the broker falls back to legacy at-most-once: messages are
+   * marked delivered=1 immediately on poll, with the original silent-loss
+   * risk on push failure — but no duplicate-storm during a rollout where
+   * old MCP server subprocesses outlive a broker upgrade.
+   */
+  ack_supported?: boolean;
 }
 
 export interface PollMessagesResponse {
   messages: Message[];
+}
+
+export interface AckMessagesRequest {
+  id: PeerId;
+  message_ids: number[];
 }
