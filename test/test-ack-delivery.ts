@@ -17,6 +17,7 @@
  */
 
 import { existsSync, unlinkSync } from "node:fs";
+import { Database } from "bun:sqlite";
 
 const TEST_PORT = 7900;
 const TEST_DB = `/tmp/claude-peers-test-${Date.now()}.db`;
@@ -210,6 +211,31 @@ try {
   });
   console.log();
 
+  // --- Test 10: read-only subscribe_all observes recently acked messages ---
+  console.log("[test 10] read-only subscribe_all observes recently acked messages");
+  await fetchJson("/send-message", { from_id: sender.id, to_id: recipient.id, text: "observed-after-ack-7" });
+  res = await fetchJson<PollResp>("/poll-messages", { id: recipient.id, ack_supported: true });
+  const ackedMsg = res.messages.find((message) => message.text === "observed-after-ack-7");
+  assert(Boolean(ackedMsg), "recipient polled observed-after-ack-7");
+  await fetchJson<{ ok: boolean }>("/ack-messages", {
+    id: recipient.id,
+    message_ids: [ackedMsg!.id],
+  });
+
+  const observerAfterAck = await fetchJson<PollResp>("/poll-messages", {
+    id: sender.id,
+    ack_supported: true,
+    subscribe_all: true,
+    read_only: true,
+  });
+  assert(
+    observerAfterAck.messages.some((message) => message.id === ackedMsg!.id && message.text === "observed-after-ack-7"),
+    "observer saw sender-to-recipient message after recipient acked it",
+  );
+  const deliveredState = readDeliveredState(ackedMsg!.id);
+  assert(deliveredState === 1, "read-only observer left delivered state at 1");
+  console.log();
+
   console.log("---");
   console.log(`Result: ${passed} passed, ${failed} failed`);
   process.exit(failed > 0 ? 1 : 0);
@@ -222,5 +248,17 @@ try {
     } catch {
       /* ignore */
     }
+  }
+}
+
+function readDeliveredState(messageId: number): number | null {
+  const db = new Database(TEST_DB, { readonly: true });
+  try {
+    const row = db
+      .query("SELECT delivered FROM messages WHERE id = ?")
+      .get(messageId) as { delivered: number } | null;
+    return row?.delivered ?? null;
+  } finally {
+    db.close();
   }
 }

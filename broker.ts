@@ -173,16 +173,16 @@ const selectPollable = db.prepare(`
   ORDER BY sent_at ASC
 `);
 
-const selectAllUndelivered = db.prepare(`
-  SELECT * FROM messages
-  WHERE delivered = 0
-  ORDER BY sent_at ASC
-`);
-
 const selectAllPollable = db.prepare(`
   SELECT * FROM messages
   WHERE delivered = 0
     AND (polled_at IS NULL OR polled_at < ?)
+  ORDER BY sent_at ASC
+`);
+
+const selectRecentForObserver = db.prepare(`
+  SELECT * FROM messages
+  WHERE sent_at > ?
   ORDER BY sent_at ASC
 `);
 
@@ -286,7 +286,8 @@ function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   // do not claim polled_at; claiming the shared lease could hide the message
   // from the real recipient for POLL_LEASE_SECONDS.
   if (body.subscribe_all && body.read_only) {
-    const messages = selectAllUndelivered.all() as Message[];
+    const cutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+    const messages = selectRecentForObserver.all(cutoff) as Message[];
     return { messages };
   }
 
