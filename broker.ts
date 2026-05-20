@@ -24,7 +24,7 @@ import type {
 } from "./shared/types.ts";
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
-const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME ?? process.env.USERPROFILE}/.claude-peers.db`;
 
 // --- Database setup ---
 
@@ -58,15 +58,39 @@ db.run(`
   )
 `);
 
+// Check if a process is alive (cross-platform)
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e: any) {
+    // On Unix, ESRCH means "no such process" — it's dead.
+    // EPERM means "exists but we can't signal it" — it's alive.
+    if (e?.code === "EPERM") return true;
+    // On Windows, process.kill(pid, 0) is unreliable.
+    // Fall back to tasklist to check if the PID exists.
+    if (process.platform === "win32") {
+      try {
+        const result = Bun.spawnSync(["tasklist", "/FI", `PID eq ${pid}`, "/NH"], {
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const output = new TextDecoder().decode(result.stdout);
+        return output.includes(String(pid));
+      } catch {
+        // If tasklist fails, assume alive to avoid false cleanup
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
 // Clean up stale peers (PIDs that no longer exist) on startup
 function cleanStalePeers() {
   const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
   for (const peer of peers) {
-    try {
-      // Check if process is still alive (signal 0 doesn't kill, just checks)
-      process.kill(peer.pid, 0);
-    } catch {
-      // Process doesn't exist, remove it
+    if (!isProcessAlive(peer.pid)) {
       db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
       db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
     }
@@ -186,14 +210,12 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
 
   // Verify each peer's process is still alive
   return peers.filter((p) => {
-    try {
-      process.kill(p.pid, 0);
+    if (isProcessAlive(p.pid)) {
       return true;
-    } catch {
-      // Clean up dead peer
-      deletePeer.run(p.id);
-      return false;
     }
+    // Clean up dead peer
+    deletePeer.run(p.id);
+    return false;
   });
 }
 
@@ -208,10 +230,16 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
   return { ok: true };
 }
 
+function handlePeekMessages(body: PollMessagesRequest): PollMessagesResponse {
+  // Read without marking as delivered — used by the auto-polling loop
+  const messages = selectUndelivered.all(body.id) as Message[];
+  return { messages };
+}
+
 function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   const messages = selectUndelivered.all(body.id) as Message[];
 
-  // Mark them as delivered
+  // Mark them as delivered — only called by explicit check_messages
   for (const msg of messages) {
     markDelivered.run(msg.id);
   }
@@ -255,6 +283,8 @@ Bun.serve({
           return Response.json(handleListPeers(body as ListPeersRequest));
         case "/send-message":
           return Response.json(handleSendMessage(body as SendMessageRequest));
+        case "/peek-messages":
+          return Response.json(handlePeekMessages(body as PollMessagesRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
         case "/unregister":
