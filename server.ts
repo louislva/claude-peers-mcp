@@ -19,6 +19,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { fileURLToPath } from "node:url";
 import type {
   PeerId,
   Peer,
@@ -38,7 +39,9 @@ const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
-const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
+// `fileURLToPath` normalizes the path on Windows. `new URL(...).pathname` returns
+// "/C:/Users/.../broker.ts" with a leading slash, which `Bun.spawn` cannot resolve.
+const BROKER_SCRIPT = fileURLToPath(new URL("./broker.ts", import.meta.url));
 
 // --- Broker communication ---
 
@@ -71,10 +74,14 @@ async function ensureBroker(): Promise<void> {
   }
 
   log("Starting broker daemon...");
+  // Detach so the broker survives if this MCP server exits.
+  // On Windows, `proc.unref()` alone is not enough — the OS has no Unix detach semantics,
+  // and `stdio: [..., "inherit"]` for stderr ties the broker's stderr handle to the parent.
+  // When the MCP server exits, the broker would die trying to write to a closed handle.
+  // `detached: true` + all-ignore stdio breaks both ties; on macOS/Linux it is harmless.
   const proc = Bun.spawn(["bun", BROKER_SCRIPT], {
-    stdio: ["ignore", "ignore", "inherit"],
-    // Detach so the broker survives if this MCP server exits
-    // On macOS/Linux, the broker will keep running
+    stdio: ["ignore", "ignore", "ignore"],
+    detached: true,
   });
 
   // Unref so this process can exit without waiting for the broker
