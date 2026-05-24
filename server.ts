@@ -364,20 +364,27 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         };
       }
       try {
-        const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
+        // Use /recent-messages (read-only view of last 10 min) instead of
+        // /poll-messages so we can surface messages that were already delivered
+        // via channel push but never reached the session — common in background
+        // job sessions where push notifications drop silently.
+        const result = await brokerFetch<PollMessagesResponse>("/recent-messages", {
+          id: myId,
+          since_minutes: 10,
+        });
         if (result.messages.length === 0) {
           return {
-            content: [{ type: "text" as const, text: "No new messages." }],
+            content: [{ type: "text" as const, text: "No messages in the last 10 minutes." }],
           };
         }
         const lines = result.messages.map(
-          (m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`
+          (m) => `From ${m.from_id} (${m.sent_at})${m.delivered ? " [already delivered via channel push]" : ""}:\n${m.text}`
         );
         return {
           content: [
             {
               type: "text" as const,
-              text: `${result.messages.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`,
+              text: `${result.messages.length} message(s) in the last 10 minutes:\n\n${lines.join("\n\n---\n\n")}`,
             },
           ],
         };
