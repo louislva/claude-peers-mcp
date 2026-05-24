@@ -65,3 +65,8 @@ export interface PollMessagesRequest {
 export interface PollMessagesResponse {
   messages: Message[];
 }
+
+export interface RecentMessagesRequest {
+  id: PeerId;
+  since_minutes?: number; // default 10
+}

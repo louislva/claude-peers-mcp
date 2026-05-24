@@ -19,6 +19,7 @@ import type {
   SendMessageRequest,
   PollMessagesRequest,
   PollMessagesResponse,
+  RecentMessagesRequest,
   Peer,
   Message,
 } from "./shared/types.ts";
@@ -122,6 +123,16 @@ const markDelivered = db.prepare(`
   UPDATE messages SET delivered = 1 WHERE id = ?
 `);
 
+// Recent messages window — used by check_messages tool as a fallback when channel
+// push notifications get dropped (e.g. background jobs). Does NOT mark as delivered.
+const selectRecent = db.prepare(`
+  SELECT * FROM messages
+  WHERE to_id = ?
+    AND datetime(sent_at) >= datetime('now', ?)
+  ORDER BY sent_at DESC
+  LIMIT 50
+`);
+
 // --- Generate peer ID ---
 
 function generateId(): string {
@@ -219,6 +230,16 @@ function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   return { messages };
 }
 
+function handleRecentMessages(body: RecentMessagesRequest): PollMessagesResponse {
+  const sinceMinutes = body.since_minutes ?? 10;
+  const interval = `-${sinceMinutes} minutes`;
+  const messages = selectRecent.all(body.id, interval) as Message[];
+  // Intentionally does NOT mark as delivered — this is a read-only view of the
+  // recent inbox so background-job sessions can recover messages that channel
+  // push notifications dropped.
+  return { messages };
+}
+
 function handleUnregister(body: { id: string }): void {
   deletePeer.run(body.id);
 }
@@ -257,6 +278,8 @@ Bun.serve({
           return Response.json(handleSendMessage(body as SendMessageRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
+        case "/recent-messages":
+          return Response.json(handleRecentMessages(body as RecentMessagesRequest));
         case "/unregister":
           handleUnregister(body as { id: string });
           return Response.json({ ok: true });
