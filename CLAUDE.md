@@ -11,8 +11,10 @@ Peer discovery and messaging MCP channel for Claude Code instances.
 ## Architecture
 
 - `broker.ts` — Singleton HTTP daemon on localhost:7899 + SQLite. Auto-launched by the MCP server.
-- `server.ts` — MCP stdio server, one per Claude Code instance. Connects to broker, exposes tools, pushes channel notifications.
+- `server.ts` — MCP stdio server, one per Claude Code instance. Connects to broker, exposes tools, pushes channel notifications. Channel push only runs for Claude Code clients (detected via MCP `clientInfo`); for other clients (opencode) messages stay queued.
+- `opencode-plugin.ts` — opencode plugin (symlinked into `~/.config/opencode/plugins/`). Delivers inbound messages to opencode sessions: polls the broker for the peer registered by this opencode's MCP server (matched via process tree) and injects via `session.prompt_async`, queueing while busy and flushing on `session.idle`. Must keep a single default export — opencode treats every export as a plugin.
 - `shared/types.ts` — Shared TypeScript types for broker API.
+- `shared/opencode.ts` — Pure helpers for the opencode plugin (ps parsing, channel formatting).
 - `shared/summarize.ts` — Auto-summary generation via gpt-5.4-nano.
 - `cli.ts` — CLI utility for inspecting broker state.
 
