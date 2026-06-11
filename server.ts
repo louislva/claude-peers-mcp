@@ -513,11 +513,25 @@ async function main() {
   }
 
   // 5. Connect MCP over stdio
+  // The push loop must wait for the MCP handshake: channel notifications are a
+  // Claude Code-only protocol, and polling drains the broker queue. For other
+  // clients (e.g. opencode) messages must stay queued so the opencode plugin
+  // (opencode-plugin.ts) or the check_messages tool can deliver them.
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  mcp.oninitialized = () => {
+    const clientName = mcp.getClientVersion()?.name ?? "unknown";
+    if (clientName.toLowerCase().includes("claude")) {
+      log(`Client "${clientName}" supports channel push; starting inbound poll loop`);
+      pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
+    } else {
+      log(
+        `Client "${clientName}" cannot receive channel notifications; ` +
+          `inbound messages stay queued for external delivery or check_messages`
+      );
+    }
+  };
   await mcp.connect(new StdioServerTransport());
   log("MCP connected");
-
-  // 6. Start polling for inbound messages
-  const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
 
   // 7. Start heartbeat
   const heartbeatTimer = setInterval(async () => {
@@ -532,7 +546,7 @@ async function main() {
 
   // 8. Clean up on exit
   const cleanup = async () => {
-    clearInterval(pollTimer);
+    if (pollTimer) clearInterval(pollTimer);
     clearInterval(heartbeatTimer);
     if (myId) {
       try {

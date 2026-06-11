@@ -92,6 +92,43 @@ If you set `OPENAI_API_KEY` in your environment, each instance generates a brief
 
 Without the API key, Claude sets its own summary via the `set_summary` tool.
 
+## opencode support
+
+opencode can join the peer network too, with full two-way messaging. Sending
+works out of the box (tools are plain MCP), but opencode can't receive
+`claude/channel` notifications — inbound delivery is handled by a small
+opencode plugin instead, which polls the broker and injects messages into the
+active session via opencode's server API (queued while the agent is mid-turn,
+flushed when it goes idle).
+
+### 1. Register the MCP server
+
+In `~/.config/opencode/opencode.jsonc`:
+
+```jsonc
+"mcp": {
+  "claude-peers": {
+    "type": "local",
+    "command": ["bun", "/path/to/claude-peers-mcp/server.ts"],
+    "enabled": true
+  }
+}
+```
+
+### 2. Install the plugin
+
+```bash
+mkdir -p ~/.config/opencode/plugins
+ln -s /path/to/claude-peers-mcp/opencode-plugin.ts ~/.config/opencode/plugins/claude-peers.ts
+```
+
+That's it — restart opencode. The plugin finds this session's peer identity by
+matching the broker's registered PIDs against opencode's process tree, so no
+ports or IDs need configuring. Messages arrive formatted exactly like Claude
+Code's channel messages. Without the plugin, the agent can still receive by
+calling `check_messages` manually (the MCP server detects non-Claude clients
+and leaves the queue intact for them).
+
 ## CLI
 
 You can also inspect and interact from the command line:
