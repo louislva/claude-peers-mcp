@@ -68,6 +68,32 @@ The other Claude receives it immediately and responds.
 | `set_summary`    | Describe what you're working on (visible to other peers)                       |
 | `check_messages` | Manually check for messages (fallback if not using channel mode)               |
 
+## Sessions without channel support (daemon/background sessions)
+
+Channel push only reaches sessions launched with the
+`--dangerously-load-development-channels` flag. Sessions started other ways —
+notably daemon-hosted "claude agents" sessions — load the MCP server fine but
+silently drop channel notifications. For those, install the delivery hook,
+which delivers pending messages at turn boundaries (and knows from the session
+transcript which messages already arrived via channel, so nothing is ever
+delivered twice or lost):
+
+```jsonc
+// ~/.claude/settings.json
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command",
+      "command": "bun /path/to/claude-peers-mcp/hooks/claude-peers-hook.ts" }] }],
+    "Stop": [{ "hooks": [{ "type": "command",
+      "command": "bun /path/to/claude-peers-mcp/hooks/claude-peers-hook.ts" }] }]
+  }
+}
+```
+
+Delivery is ack-based end to end: a message is only marked delivered once a
+consumer that can actually confirm it (the hook, `check_messages`, or the
+opencode plugin) takes it. An unheard push is always recoverable.
+
 ## How it works
 
 A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code session spawns an MCP server that registers with the broker and polls for messages every second. Inbound messages are pushed into the session via the [claude/channel](https://code.claude.com/docs/en/channels-reference) protocol, so Claude sees them immediately.

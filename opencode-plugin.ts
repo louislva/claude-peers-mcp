@@ -64,8 +64,40 @@ async function findMyPeerId(cwd: string): Promise<PeerId | null> {
 const ClaudePeersPlugin: Plugin = async ({ client, directory }) => {
   let peerId: PeerId | null = null;
   let lastSessionID: string | null = null;
-  let pending: string[] = [];
+  let pending: { id: number; text: string }[] = [];
   let loggedBrokerDown = false;
+  // Unacked messages reappear on every fetch until acked; track what we've
+  // already taken responsibility for so they aren't queued twice.
+  const handled = new Set<number>();
+  // Old brokers only have the draining /poll-messages (no ack needed there)
+  let legacyBroker = false;
+
+  async function fetchInbound(id: PeerId) {
+    if (!legacyBroker) {
+      try {
+        const res = await brokerFetch<PollMessagesResponse>("/fetch-messages", { id });
+        return res.messages;
+      } catch (e) {
+        if (e instanceof Error && e.message.includes("404")) {
+          log("Broker predates /fetch-messages; using legacy drain");
+          legacyBroker = true;
+        } else {
+          throw e;
+        }
+      }
+    }
+    const res = await brokerFetch<PollMessagesResponse>("/poll-messages", { id });
+    return res.messages;
+  }
+
+  async function ack(messageIds: number[]) {
+    if (legacyBroker || !peerId || messageIds.length === 0) return;
+    try {
+      await brokerFetch("/ack-messages", { id: peerId, message_ids: messageIds });
+    } catch (e) {
+      log(`Ack failed (message may be re-delivered): ${e instanceof Error ? e.message : e}`);
+    }
+  }
 
   async function activeSessionID(): Promise<string | null> {
     if (lastSessionID) return lastSessionID;
@@ -94,19 +126,21 @@ const ClaudePeersPlugin: Plugin = async ({ client, directory }) => {
   }
 
   /** Deliver now if the session is idle, otherwise hold until session.idle. */
-  async function deliver(text: string) {
+  async function deliver(msgId: number, text: string) {
     const sessionID = await activeSessionID();
     if (!sessionID || (await isBusy(sessionID))) {
-      pending.push(text);
+      pending.push({ id: msgId, text });
       return;
     }
     await prompt(sessionID, text);
+    await ack([msgId]);
   }
 
   async function flushPending(sessionID: string) {
     if (pending.length === 0) return;
-    const batch = pending.splice(0).join("\n\n");
-    await prompt(sessionID, batch);
+    const batch = pending.splice(0);
+    await prompt(sessionID, batch.map((p) => p.text).join("\n\n"));
+    await ack(batch.map((p) => p.id));
   }
 
   async function tick() {
@@ -116,9 +150,7 @@ const ClaudePeersPlugin: Plugin = async ({ client, directory }) => {
         if (!peerId) return; // MCP server not registered yet; retry next tick
         log(`Delivering inbound messages for peer ${peerId}`);
       }
-      const { messages } = await brokerFetch<PollMessagesResponse>("/poll-messages", {
-        id: peerId,
-      });
+      const messages = (await fetchInbound(peerId)).filter((m) => !handled.has(m.id));
       if (messages.length === 0) return;
 
       let peers: Peer[] = [];
@@ -129,7 +161,8 @@ const ClaudePeersPlugin: Plugin = async ({ client, directory }) => {
       }
       for (const msg of messages as Message[]) {
         const sender = peers.find((p) => p.id === msg.from_id);
-        await deliver(formatChannelMessage(msg, sender));
+        handled.add(msg.id);
+        await deliver(msg.id, formatChannelMessage(msg, sender));
         log(`Delivered message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
       }
       loggedBrokerDown = false;

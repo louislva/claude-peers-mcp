@@ -25,6 +25,14 @@ import type {
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+// Peers whose heartbeats stop are pruned even if their PID is still alive —
+// a zombie MCP server (host session gone, stdio closed) and a reused PID look
+// identical to a liveness check. Heartbeat interval is 15s, so 120s = 8 missed.
+const STALE_TTL_MS = parseInt(process.env.CLAUDE_PEERS_STALE_TTL_MS ?? "120000", 10);
+const CLEAN_INTERVAL_MS = parseInt(process.env.CLAUDE_PEERS_CLEAN_INTERVAL_MS ?? "30000", 10);
+// GC: acked messages kept 24h (debugging), unacked 72h (recovery window)
+const ACKED_MSG_TTL_MS = 24 * 3600 * 1000;
+const UNACKED_MSG_TTL_MS = 72 * 3600 * 1000;
 
 // --- Database setup ---
 
@@ -58,25 +66,41 @@ db.run(`
   )
 `);
 
-// Clean up stale peers (PIDs that no longer exist) on startup
+// Clean up stale peers on startup: dead PIDs, and live PIDs whose heartbeats
+// stopped (zombie servers whose host session is gone keep their PID alive).
 function cleanStalePeers() {
-  const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
+  const peers = db
+    .query("SELECT id, pid, last_seen FROM peers")
+    .all() as { id: string; pid: number; last_seen: string }[];
+  const staleCutoff = new Date(Date.now() - STALE_TTL_MS).toISOString();
   for (const peer of peers) {
-    try {
-      // Check if process is still alive (signal 0 doesn't kill, just checks)
-      process.kill(peer.pid, 0);
-    } catch {
-      // Process doesn't exist, remove it
+    let stale = peer.last_seen < staleCutoff;
+    if (!stale) {
+      try {
+        // Check if process is still alive (signal 0 doesn't kill, just checks)
+        process.kill(peer.pid, 0);
+      } catch {
+        stale = true;
+      }
+    }
+    if (stale) {
       db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
       db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
     }
   }
+
+  // GC old messages so unacked rows can't accumulate forever
+  db.run("DELETE FROM messages WHERE delivered = 1 AND sent_at < ?", [
+    new Date(Date.now() - ACKED_MSG_TTL_MS).toISOString(),
+  ]);
+  db.run("DELETE FROM messages WHERE delivered = 0 AND sent_at < ?", [
+    new Date(Date.now() - UNACKED_MSG_TTL_MS).toISOString(),
+  ]);
 }
 
 cleanStalePeers();
 
-// Periodically clean stale peers (every 30s)
-setInterval(cleanStalePeers, 30_000);
+setInterval(cleanStalePeers, CLEAN_INTERVAL_MS);
 
 // --- Prepared statements ---
 
@@ -149,8 +173,12 @@ function handleRegister(body: RegisterRequest): RegisterResponse {
   return { id };
 }
 
-function handleHeartbeat(body: HeartbeatRequest): void {
-  updateLastSeen.run(new Date().toISOString(), body.id);
+function handleHeartbeat(body: HeartbeatRequest): { ok: boolean; known: boolean } {
+  // `known: false` tells a server it was pruned (e.g. stale heartbeats during
+  // a suspend) and should re-register.
+  const exists = db.query("SELECT id FROM peers WHERE id = ?").get(body.id) !== null;
+  if (exists) updateLastSeen.run(new Date().toISOString(), body.id);
+  return { ok: true, known: exists };
 }
 
 function handleSetSummary(body: SetSummaryRequest): void {
@@ -208,6 +236,9 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
   return { ok: true };
 }
 
+// Legacy drain: fetch + mark in one step. Kept for old servers; the moment a
+// host harness drops the pushed notification, the message is unrecoverable.
+// New consumers use /fetch-messages (peek) + /ack-messages (explicit).
 function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   const messages = selectUndelivered.all(body.id) as Message[];
 
@@ -217,6 +248,18 @@ function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
   }
 
   return { messages };
+}
+
+function handleFetchMessages(body: PollMessagesRequest): PollMessagesResponse {
+  return { messages: selectUndelivered.all(body.id) as Message[] };
+}
+
+function handleAckMessages(body: { id: string; message_ids: number[] }): { ok: boolean } {
+  for (const msgId of body.message_ids) {
+    // Only ack messages addressed to the acking peer
+    db.run("UPDATE messages SET delivered = 1 WHERE id = ? AND to_id = ?", [msgId, body.id]);
+  }
+  return { ok: true };
 }
 
 function handleUnregister(body: { id: string }): void {
@@ -246,8 +289,7 @@ Bun.serve({
         case "/register":
           return Response.json(handleRegister(body as RegisterRequest));
         case "/heartbeat":
-          handleHeartbeat(body as HeartbeatRequest);
-          return Response.json({ ok: true });
+          return Response.json(handleHeartbeat(body as HeartbeatRequest));
         case "/set-summary":
           handleSetSummary(body as SetSummaryRequest);
           return Response.json({ ok: true });
@@ -257,6 +299,10 @@ Bun.serve({
           return Response.json(handleSendMessage(body as SendMessageRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
+        case "/fetch-messages":
+          return Response.json(handleFetchMessages(body as PollMessagesRequest));
+        case "/ack-messages":
+          return Response.json(handleAckMessages(body as { id: string; message_ids: number[] }));
         case "/unregister":
           handleUnregister(body as { id: string });
           return Response.json({ ok: true });

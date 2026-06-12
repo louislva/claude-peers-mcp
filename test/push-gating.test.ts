@@ -113,11 +113,22 @@ test(
     expect(pushed[0]!.method).toBe("notifications/claude/channel");
     expect(JSON.stringify(pushed[0]!.params)).toContain("hello claude");
 
-    // ...and the claude client's queue was drained by the push
+    // ...but the push does NOT ack: the message stays recoverable until an
+    // acking consumer (check_messages / the delivery hook) takes it
     const claudeChecked = toolText(
       await claudeClient.callTool({ name: "check_messages", arguments: {} })
     );
-    expect(claudeChecked).toContain("No new messages");
+    expect(claudeChecked).toContain("hello claude");
+    expect(claudeChecked).toContain("also pushed");
+
+    // ...and check_messages acked it, so a second call comes back empty
+    const claudeChecked2 = toolText(
+      await claudeClient.callTool({ name: "check_messages", arguments: {} })
+    );
+    expect(claudeChecked2).toContain("No new messages");
+
+    // the push loop must not re-push unacked messages it already pushed
+    expect(pushed.length).toBe(1);
   },
   30_000
 );

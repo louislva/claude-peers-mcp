@@ -10,8 +10,9 @@ Peer discovery and messaging MCP channel for Claude Code instances.
 
 ## Architecture
 
-- `broker.ts` — Singleton HTTP daemon on localhost:7899 + SQLite. Auto-launched by the MCP server.
-- `server.ts` — MCP stdio server, one per Claude Code instance. Connects to broker, exposes tools, pushes channel notifications. Channel push only runs for Claude Code clients (detected via MCP `clientInfo`); for other clients (opencode) messages stay queued.
+- `broker.ts` — Singleton HTTP daemon on localhost:7899 + SQLite. Auto-launched by the MCP server. Prunes peers whose heartbeats go stale (not just dead PIDs). Delivery is ack-based: `/fetch-messages` peeks, `/ack-messages` consumes (`/poll-messages` is the legacy drain).
+- `server.ts` — MCP stdio server, one per Claude Code instance. Connects to broker, exposes tools, pushes channel notifications. Channel push only runs for Claude Code clients (detected via MCP `clientInfo`) and NEVER acks — whether the harness surfaces a channel notification is undetectable (sessions without the channels flag drop it silently; the handshake is identical). Acking is done by confirmed consumers: check_messages, the delivery hook, or the opencode plugin. Exits when stdin/MCP transport closes so dead sessions don't leave message-swallowing zombies.
+- `hooks/claude-peers-hook.ts` — Claude Code hook (UserPromptSubmit + Stop) that makes delivery reliable for sessions without channel support (e.g. daemon-hosted "claude agents" sessions): fetches unacked messages, checks the transcript to see which ones actually surfaced (by `sent_at`), acks all, injects the rest as context / blocks Stop.
 - `opencode-plugin.ts` — opencode plugin (symlinked into `~/.config/opencode/plugins/`). Delivers inbound messages to opencode sessions: polls the broker for the peer registered by this opencode's MCP server (matched via process tree) and injects via `session.prompt_async`, queueing while busy and flushing on `session.idle`. Must keep a single default export — opencode treats every export as a plugin.
 - `shared/types.ts` — Shared TypeScript types for broker API.
 - `shared/opencode.ts` — Pure helpers for the opencode plugin (ps parsing, channel formatting).
