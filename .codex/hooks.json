@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env bash /home/manzo/claude-peers-mcp/hooks/codex-drain-peer-inbox.sh",
+            "timeout": 5,
+            "statusMessage": "Checking peer inbox"
+          }
+        ]
+      }
+    ]
+  }
+}

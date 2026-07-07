@@ -1,0 +1,155 @@
+#!/bin/bash
+# ensure-codex-autodrain — idempotently start the claude-peers Codex auto-drain
+# poller in a dedicated tmux window, IF it is not already running.
+#
+# Why a tmux window (not systemd): the poller drives tmux (capture-pane +
+# send-keys), and a tmux client spawned by bun inside a systemd-user scope
+# cannot complete the tmux client-server handshake ("server exited
+# unexpectedly", verified 2026-06-15). Running it INSIDE tmux gives native
+# server access. This script is called from .tmux.conf via run-shell so the
+# window is recreated whenever tmux (re)starts.
+#
+# Idempotent + WATCHDOG: if a poller is alive AND ticking (fresh heartbeat), do
+# nothing. If a poller is alive but WEDGED (heartbeat stale → alive but no longer
+# ticking, the 'silent for 16h' zombie), kill it so the spawn below restarts it.
+# Safe to call on every tmux reload and from a periodic watchdog tick.
+set -u
+
+# Single-flight (review #5): cron (every 2min) and the .tmux.conf run-shell can
+# fire this script concurrently. Two overlapping runs could each kill+sleep+spawn
+# and race into >1 poller (dedup-on-sight recovers on the next run, but the lock
+# closes the window to zero). Re-exec under a non-blocking flock; a second
+# concurrent run exits immediately rather than queueing. flock is best-effort —
+# if it is unavailable, fall through and run unlocked (dedup-on-sight still
+# bounds the damage).
+LOCK=/tmp/ensure-codex-autodrain.lock
+if [ -z "${_AUTODRAIN_LOCKED:-}" ] && command -v flock >/dev/null 2>&1; then
+  # Re-run self under the lock. NOT `exec` — exec would replace the shell, so
+  # flock's exit-1-on-contention would propagate as this script's exit code (a
+  # spurious cron error). Run in a subshell instead and normalize "lock held"
+  # (flock -n exit 1) to a clean exit 0.
+  _AUTODRAIN_LOCKED=1 flock -n "$LOCK" "$0" "$@"
+  rc=$?
+  [ "$rc" -eq 1 ] && exit 0   # lock held by a concurrent run → clean no-op
+  exit "$rc"
+fi
+export _AUTODRAIN_LOCKED
+
+POLLER=/home/manzo/claude-peers-mcp/bin/codex-autodrain-poller.ts
+LOG=/home/manzo/.claude-peers-codex-autodrain.log
+WINDOW=codex-autodrain
+HEARTBEAT=/home/manzo/.claude-peers-autodrain.heartbeat
+
+# tmux reachability when this script runs OUTSIDE an interactive shell (cron, a
+# systemd timer). Two stripped-env traps, both of which produce the generic
+# "server exited unexpectedly" — fixed here so the watchdog reaches the SAME
+# server an interactive session uses (this was the real root of the earlier
+# "systemd/cron can't reach tmux" failures):
+#   1. WRONG BINARY: PATH defaults to /usr/bin (distro tmux 3.4) while the
+#      running server is the locally-built /usr/local/bin/tmux (next-3.7). A 3.4
+#      client cannot handshake a next-3.7 server. Pin the absolute path to the
+#      binary that matches the server. Auto-detect, preferring /usr/local/bin.
+#   2. NO SOCKET CONTEXT: no inherited $TMUX/$TMUX_TMPDIR → pin the default socket.
+: "${TMUX_TMPDIR:=/tmp}"
+TMUX_SOCK="${TMUX_TMPDIR}/tmux-$(id -u)/default"
+TMUX_BIN=/usr/local/bin/tmux
+[ -x "$TMUX_BIN" ] || TMUX_BIN="$(command -v tmux 2>/dev/null)"
+tmux() { "$TMUX_BIN" -S "$TMUX_SOCK" "$@"; }
+# Stale threshold: a healthy poller touches the heartbeat every tick
+# (POLL_INTERVAL_MS, default 15s). Allow ~4 missed ticks before declaring it
+# wedged, so a single slow tick or a brief tmux contention spike doesn't trigger
+# a needless restart.
+STALE_AFTER_S=70
+
+# Match the actual `bun .../codex-autodrain-poller.ts` daemon specifically.
+# Defined ONCE so pgrep and every pkill use the identical pattern (no drift).
+# Anchoring (review #3): require `bun<...>` then the poller `.ts` at END of the
+# command line — so it does NOT match the `bash -c ... exec bun ...` launcher
+# wrapper, a one-shot `bun run <poller> --flag` (trailing flag → not end-
+# anchored), or an unrelated `bun <other>` that merely mentions the path.
+POLLER_MATCH='bun[^ ]* .*/codex-autodrain-poller\.ts$'
+POLLER_PIDS=$(pgrep -f "$POLLER_MATCH" 2>/dev/null)
+POLLER_COUNT=$(printf '%s\n' "$POLLER_PIDS" | grep -c .)
+
+# DEDUP-ON-SIGHT: two pollers both nudge the same lanes → double keystrokes into
+# panes. The spawn path avoids creating dupes, but a dupe arriving by any other
+# route (manual launch, a tmux-reload race) would persist because the freshness
+# check below only needs ONE fresh poller to exit 0. So if >1 exist, collapse to
+# zero unconditionally and respawn exactly one.
+if [ "$POLLER_COUNT" -gt 1 ]; then
+  echo "$(date -Iseconds) watchdog: ${POLLER_COUNT} pollers running — collapsing to one" >> "$LOG"
+  pkill -9 -f "$POLLER_MATCH" 2>/dev/null
+  sleep 1
+  # fall through to spawn exactly one
+elif [ "$POLLER_COUNT" -eq 1 ]; then
+  # Exactly one process. Readiness, not just liveness: is it still TICKING?
+  if [ -f "$HEARTBEAT" ]; then
+    now=$(date +%s)
+    hb=$(stat -c %Y "$HEARTBEAT" 2>/dev/null || echo 0)
+    age=$(( now - hb ))
+    if [ "$age" -le "$STALE_AFTER_S" ]; then
+      exit 0   # alive AND fresh → healthy, nothing to do
+    fi
+    echo "$(date -Iseconds) watchdog: poller alive but heartbeat stale (${age}s > ${STALE_AFTER_S}s) — restarting wedged poller" >> "$LOG"
+    pkill -9 -f "$POLLER_MATCH" 2>/dev/null
+    sleep 1   # let the process exit + release its tmux window
+    # fall through to (re)spawn below
+  else
+    # No heartbeat file yet but a process exists. This is either a freshly-started
+    # poller (heartbeat lands on its first tick) OR an OLD poller predating the
+    # heartbeat feature. Give a fresh start a grace window: if the process is
+    # young, assume it's about to write one; if it's old (no heartbeat ever),
+    # treat it as wedged and restart. Use THE POLLER'S OWN process age as the
+    # proxy — scope the etime query to $POLLER_PIDS (the args-filtered pgrep
+    # result), NOT `-C bun` which matches EVERY bun process on the host: with
+    # other long-lived bun daemons present, `-C bun` always returns a huge oldest
+    # etime, the grace branch never fires, and a healthy young poller gets killed
+    # on every watchdog tick before it can write its first heartbeat.
+    poller_etime=$(ps -o etimes= -p "$POLLER_PIDS" 2>/dev/null | tr -d ' ' | sort -n | tail -1)
+    if [ -n "${poller_etime:-}" ] && [ "$poller_etime" -gt "$STALE_AFTER_S" ]; then
+      echo "$(date -Iseconds) watchdog: poller alive but NO heartbeat after ${poller_etime}s — restarting (pre-heartbeat or wedged)" >> "$LOG"
+      pkill -9 -f "$POLLER_MATCH" 2>/dev/null
+      sleep 1
+      # fall through to respawn
+    else
+      exit 0   # young process — heartbeat imminent, don't churn
+    fi
+  fi
+fi
+
+# Reaching here means we are about to (re)spawn the poller (either none was
+# running, or we just killed a wedged/duplicate one). Remove any stale heartbeat
+# so the fresh poller does NOT inherit the dead poller's mtime — otherwise the
+# next watchdog tick would read an already-stale heartbeat and kill the new
+# poller before its first tick writes a fresh one (restart loop). The grace
+# window (scoped poller etime above) covers the gap until the first heartbeat.
+rm -f "$HEARTBEAT" 2>/dev/null
+
+# Need a tmux server with at least one session to host the window.
+if ! tmux list-sessions >/dev/null 2>&1; then
+  exit 0  # no tmux yet — nothing to attach to; a later reload will catch it
+fi
+
+# Pick the first session as host (the poller only needs tmux server access; the
+# host session is irrelevant to its function).
+HOST_SESSION="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | head -1)"
+[ -z "$HOST_SESSION" ] && exit 0
+
+# Remove any stale (process-dead) window of the same name first, then create one.
+# Target the session with a TRAILING COLON ("name:") so tmux treats the target
+# as a SESSION, not a window index — critical when the session is named "1",
+# where a bare "-t 1" is parsed as window-index 1 ("create window failed: index
+# 1 in use") instead of session 1.
+tmux list-windows -t "${HOST_SESSION}:" -F '#{window_name}' 2>/dev/null \
+  | grep -qx "$WINDOW" && tmux kill-window -t "${HOST_SESSION}:${WINDOW}" 2>/dev/null
+
+# Pin the ABSOLUTE path to bun: the new window's shell inherits this script's
+# PATH, which under cron (/usr/bin:/bin) does NOT include the nvm/.bun bin dir,
+# so a bare `bun` would not be found and the window would die instantly (same
+# class as the TOOL-08 node-symlink trap). Auto-detect, preferring ~/.bun/bin.
+BUN_BIN=/home/manzo/.bun/bin/bun
+[ -x "$BUN_BIN" ] || BUN_BIN="$(command -v bun 2>/dev/null)"
+tmux new-window -d -t "${HOST_SESSION}:" -n "$WINDOW" \
+  "cd /home/manzo && exec '$BUN_BIN' '$POLLER' 2>&1 | tee -a '$LOG'" 2>/dev/null
+
+exit 0

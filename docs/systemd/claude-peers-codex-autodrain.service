@@ -1,0 +1,61 @@
+[Unit]
+Description=claude-peers Codex auto-drain poller (nudges idle Codex/Gemini lanes to read peer mail)
+Documentation=file:///home/manzo/claude-peers-mcp/bin/codex-autodrain-poller.ts
+After=default.target claude-peers-broker.service
+Wants=claude-peers-broker.service
+
+# Fail-loud cap: if the poller crashes >5 times in 60s, stop trying — operator
+# must intervene. Second layer of zombie protection on top of the in-code
+# per-lane try/catch (a crash should be impossible, but if one slips through,
+# systemd restarts it; if it crash-loops, systemd gives up loudly).
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/home/manzo
+ExecStart=/home/manzo/.bun/bin/bun /home/manzo/claude-peers-mcp/bin/codex-autodrain-poller.ts
+
+# Auto-restart on any non-zero exit.
+Restart=on-failure
+RestartSec=5s
+
+# Logs to a dedicated file + journal.
+StandardOutput=append:/home/manzo/.claude-peers-codex-autodrain.log
+StandardError=append:/home/manzo/.claude-peers-codex-autodrain.log
+
+# === Environment ===
+# Minimal, like the broker. NOTE: the poller drives tmux (capture-pane +
+# send-keys), so it MUST reach the user's tmux socket in /tmp — hence NO
+# PrivateTmp below, and TMUX_TMPDIR points at the real socket dir.
+Environment=HOME=/home/manzo
+Environment=PATH=/home/manzo/.bun/bin:/usr/bin:/bin
+Environment=BUN_INSTALL=/home/manzo/.bun
+# tmux forms its socket dir as $TMUX_TMPDIR/tmux-<uid>/, so TMUX_TMPDIR is /tmp
+# (NOT /tmp/tmux-1000 — that doubles to /tmp/tmux-1000/tmux-1000 and fails to
+# connect). The live socket is /tmp/tmux-1000/default.
+Environment=TMUX_TMPDIR=/tmp
+# Auto-nudge is OFF by default (operator decision 2026-06-18): the poller does NOT
+# type "check your peer inbox..." into idle lanes. Claude lanes piggyback-drain
+# pending mail on their next turn for free; idle Codex/Gemini wakes burned quota to
+# drain low-value chatter. Mail still flows on each lane's next natural turn. This
+# line pins the disabled state explicitly so it survives a reboot / unit-enable and
+# does not rely solely on the in-code default. To re-enable a client, set the
+# comma-separated list (codex/gemini/claude honored), e.g. NUDGE_CLIENTS=codex,gemini
+Environment=NUDGE_CLIENTS=
+# Tunables (defaults shown; override here if needed):
+# Environment=POLL_INTERVAL_MS=15000
+# Environment=NUDGE_COOLDOWN_MS=60000
+# Environment=MAX_NUDGE_ATTEMPTS=5
+
+# === Process hardening (user-mode-safe subset; PrivateTmp INTENTIONALLY OMITTED
+# because the poller needs the shared /tmp tmux socket) ===
+NoNewPrivileges=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+# Poller talks to the broker over loopback (DB is read-only file) + spawns tmux/ps.
+RestrictAddressFamilies=AF_UNIX AF_INET
+
+[Install]
+WantedBy=default.target
