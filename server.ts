@@ -31,6 +31,7 @@ import {
   getGitBranch,
   getRecentFiles,
 } from "./shared/summarize.ts";
+import { fileURLToPath } from "node:url";
 
 // --- Configuration ---
 
@@ -38,7 +39,10 @@ const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
-const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: on Windows .pathname yields a broken
+// "/C:/Users/.../broker.ts" (leading slash, forward slashes) that Bun.spawn
+// cannot open. fileURLToPath returns the correct native path on every platform.
+const BROKER_SCRIPT = fileURLToPath(new URL("./broker.ts", import.meta.url));
 
 // --- Broker communication ---
 
@@ -71,13 +75,19 @@ async function ensureBroker(): Promise<void> {
   }
 
   log("Starting broker daemon...");
+  // Detach the broker into its own session/process group so it genuinely
+  // outlives this MCP server:
+  //   - detached: true → setsid() on POSIX, UV_PROCESS_DETACHED on Windows, so a
+  //     terminal-close SIGHUP / Ctrl-C aimed at this server's process group does
+  //     not also kill the shared broker (unref() alone does NOT do this).
+  //   - stdio all "ignore" → a detached daemon must not hold the parent's stderr.
+  //   - unref() → lets this process exit without waiting on the broker.
+  // (On Windows this detaches from the console; a kill-on-close Job object could
+  // still reap it, but ensureBroker() re-spawns the broker on the next start.)
   const proc = Bun.spawn(["bun", BROKER_SCRIPT], {
-    stdio: ["ignore", "ignore", "inherit"],
-    // Detach so the broker survives if this MCP server exits
-    // On macOS/Linux, the broker will keep running
+    stdio: ["ignore", "ignore", "ignore"],
+    detached: true,
   });
-
-  // Unref so this process can exit without waiting for the broker
   proc.unref();
 
   // Wait for it to come up
@@ -117,6 +127,11 @@ async function getGitRoot(cwd: string): Promise<string | null> {
 }
 
 function getTty(): string | null {
+  // TTY is a Unix concept and `ps -o tty=` is a Unix-only command. Windows has
+  // no equivalent, so skip the spawn entirely and report no TTY there.
+  if (process.platform === "win32") {
+    return null;
+  }
   try {
     // Try to get the parent's tty from the process tree
     const ppid = process.ppid;
@@ -531,7 +546,10 @@ async function main() {
   }, HEARTBEAT_INTERVAL_MS);
 
   // 8. Clean up on exit
+  let cleaningUp = false;
   const cleanup = async () => {
+    if (cleaningUp) return; // may be triggered by both a signal and stdin close
+    cleaningUp = true;
     clearInterval(pollTimer);
     clearInterval(heartbeatTimer);
     if (myId) {
@@ -547,6 +565,15 @@ async function main() {
 
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);
+
+  // Windows has no deliverable SIGTERM (the supervisor force-kills the stdio
+  // child with TerminateProcess) and never sends SIGINT to a non-console child,
+  // so the signal handlers above never fire there. Claude Code closes this
+  // process's stdin when it tears the MCP server down on every platform, so
+  // stdin EOF/close is the portable shutdown hook — it also unregisters promptly
+  // on POSIX instead of waiting for the SIGTERM fallback.
+  process.stdin.on("end", cleanup);
+  process.stdin.on("close", cleanup);
 }
 
 main().catch((e) => {

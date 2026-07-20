@@ -54,7 +54,7 @@ switch (cmd) {
           }>
         >("/list-peers", {
           scope: "machine",
-          cwd: "/",
+          cwd: process.cwd(),
           git_root: null,
         });
 
@@ -86,7 +86,7 @@ switch (cmd) {
         }>
       >("/list-peers", {
         scope: "machine",
-        cwd: "/",
+        cwd: process.cwd(),
         git_root: null,
       });
 
@@ -133,15 +133,13 @@ switch (cmd) {
     try {
       const health = await brokerFetch<{ status: string; peers: number }>("/health");
       console.log(`Broker has ${health.peers} peer(s). Shutting down...`);
-      // Find and kill the broker process on the port
-      const proc = Bun.spawnSync(["lsof", "-ti", `:${BROKER_PORT}`]);
-      const pids = new TextDecoder()
-        .decode(proc.stdout)
-        .trim()
-        .split("\n")
-        .filter((p) => p);
-      for (const pid of pids) {
-        process.kill(parseInt(pid), "SIGTERM");
+      // Ask the broker to shut itself down. This is cross-platform, unlike the
+      // previous lsof-based approach (lsof does not exist on Windows).
+      try {
+        await brokerFetch("/shutdown", {});
+      } catch {
+        // The broker exits mid-response, so the connection may drop before we
+        // read the reply — that is expected and means shutdown succeeded.
       }
       console.log("Broker stopped.");
     } catch {

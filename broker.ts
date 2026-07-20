@@ -10,6 +10,8 @@
  */
 
 import { Database } from "bun:sqlite";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type {
   RegisterRequest,
   RegisterResponse,
@@ -24,7 +26,10 @@ import type {
 } from "./shared/types.ts";
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
-const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+// Use os.homedir() rather than process.env.HOME: HOME is undefined when the
+// process is spawned natively on Windows (which uses USERPROFILE), and
+// path.join produces the correct separator on every platform.
+const DB_PATH = process.env.CLAUDE_PEERS_DB ?? join(homedir(), ".claude-peers.db");
 
 // --- Database setup ---
 
@@ -58,15 +63,26 @@ db.run(`
   )
 `);
 
+// Check whether a process is still alive. process.kill(pid, 0) sends no signal —
+// it only probes existence. It throws ESRCH when the pid is truly gone, but EPERM
+// when the process EXISTS and we merely lack permission to signal it (a peer owned
+// by another user, or one running elevated while the broker is not). EPERM means
+// alive, so treat ONLY ESRCH as dead — evicting a peer is destructive and should
+// require positive proof of death. Same semantics on Windows, Linux, macOS, BSD.
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as { code?: string }).code !== "ESRCH";
+  }
+}
+
 // Clean up stale peers (PIDs that no longer exist) on startup
 function cleanStalePeers() {
   const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
   for (const peer of peers) {
-    try {
-      // Check if process is still alive (signal 0 doesn't kill, just checks)
-      process.kill(peer.pid, 0);
-    } catch {
-      // Process doesn't exist, remove it
+    if (!isProcessAlive(peer.pid)) {
       db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
       db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
     }
@@ -101,12 +117,20 @@ const selectAllPeers = db.prepare(`
   SELECT * FROM peers
 `);
 
+// On case-insensitive filesystems (Windows), two sessions in the same directory
+// can report differently-cased paths (e.g. C:\Dev\App vs C:\dev\app) and would
+// otherwise fail to discover each other under "directory"/"repo" scope. Match
+// case-insensitively there. Gated on the broker's own platform: a blanket
+// COLLATE NOCASE would wrongly conflate genuinely distinct paths on
+// case-sensitive Linux/BSD (macOS resolves cwd casing itself, so it's unaffected).
+const PATH_COLLATE = process.platform === "win32" ? "COLLATE NOCASE" : "";
+
 const selectPeersByDirectory = db.prepare(`
-  SELECT * FROM peers WHERE cwd = ?
+  SELECT * FROM peers WHERE cwd = ? ${PATH_COLLATE}
 `);
 
 const selectPeersByGitRoot = db.prepare(`
-  SELECT * FROM peers WHERE git_root = ?
+  SELECT * FROM peers WHERE git_root = ? ${PATH_COLLATE}
 `);
 
 const insertMessage = db.prepare(`
@@ -184,16 +208,12 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
     peers = peers.filter((p) => p.id !== body.exclude_id);
   }
 
-  // Verify each peer's process is still alive
+  // Verify each peer's process is still alive (only truly-gone pids are evicted)
   return peers.filter((p) => {
-    try {
-      process.kill(p.pid, 0);
-      return true;
-    } catch {
-      // Clean up dead peer
-      deletePeer.run(p.id);
-      return false;
-    }
+    if (isProcessAlive(p.pid)) return true;
+    // Clean up dead peer
+    deletePeer.run(p.id);
+    return false;
   });
 }
 
@@ -223,51 +243,72 @@ function handleUnregister(body: { id: string }): void {
   deletePeer.run(body.id);
 }
 
+function handleShutdown(): void {
+  // Exit shortly after so the HTTP response flushes to the caller first.
+  // This replaces the previous lsof/kill approach, which only worked on Unix.
+  setTimeout(() => process.exit(0), 100);
+}
+
 // --- HTTP Server ---
 
-Bun.serve({
-  port: PORT,
-  hostname: "127.0.0.1",
-  async fetch(req) {
-    const url = new URL(req.url);
-    const path = url.pathname;
+try {
+  Bun.serve({
+    port: PORT,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+      const url = new URL(req.url);
+      const path = url.pathname;
 
-    if (req.method !== "POST") {
-      if (path === "/health") {
-        return Response.json({ status: "ok", peers: (selectAllPeers.all() as Peer[]).length });
+      if (req.method !== "POST") {
+        if (path === "/health") {
+          return Response.json({ status: "ok", peers: (selectAllPeers.all() as Peer[]).length });
+        }
+        return new Response("claude-peers broker", { status: 200 });
       }
-      return new Response("claude-peers broker", { status: 200 });
-    }
 
-    try {
-      const body = await req.json();
+      try {
+        const body = await req.json();
 
-      switch (path) {
-        case "/register":
-          return Response.json(handleRegister(body as RegisterRequest));
-        case "/heartbeat":
-          handleHeartbeat(body as HeartbeatRequest);
-          return Response.json({ ok: true });
-        case "/set-summary":
-          handleSetSummary(body as SetSummaryRequest);
-          return Response.json({ ok: true });
-        case "/list-peers":
-          return Response.json(handleListPeers(body as ListPeersRequest));
-        case "/send-message":
-          return Response.json(handleSendMessage(body as SendMessageRequest));
-        case "/poll-messages":
-          return Response.json(handlePollMessages(body as PollMessagesRequest));
-        case "/unregister":
-          handleUnregister(body as { id: string });
-          return Response.json({ ok: true });
-        default:
-          return Response.json({ error: "not found" }, { status: 404 });
+        switch (path) {
+          case "/register":
+            return Response.json(handleRegister(body as RegisterRequest));
+          case "/heartbeat":
+            handleHeartbeat(body as HeartbeatRequest);
+            return Response.json({ ok: true });
+          case "/set-summary":
+            handleSetSummary(body as SetSummaryRequest);
+            return Response.json({ ok: true });
+          case "/list-peers":
+            return Response.json(handleListPeers(body as ListPeersRequest));
+          case "/send-message":
+            return Response.json(handleSendMessage(body as SendMessageRequest));
+          case "/poll-messages":
+            return Response.json(handlePollMessages(body as PollMessagesRequest));
+          case "/unregister":
+            handleUnregister(body as { id: string });
+            return Response.json({ ok: true });
+          case "/shutdown":
+            handleShutdown();
+            return Response.json({ ok: true });
+          default:
+            return Response.json({ error: "not found" }, { status: 404 });
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return Response.json({ error: msg }, { status: 500 });
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return Response.json({ error: msg }, { status: 500 });
-    }
-  },
-});
+    },
+  });
+} catch (e) {
+  // Another broker won the port — a TOCTOU race when several sessions start at
+  // once (each sees no broker and spawns one). That broker is the singleton, so
+  // exit quietly with code 0 rather than crashing with a stack trace. Same
+  // EADDRINUSE behavior on Windows, Linux, macOS, and BSD.
+  if ((e as { code?: string }).code === "EADDRINUSE") {
+    console.error(`[claude-peers broker] port ${PORT} already in use — another broker is running`);
+    process.exit(0);
+  }
+  throw e;
+}
 
 console.error(`[claude-peers broker] listening on 127.0.0.1:${PORT} (db: ${DB_PATH})`);

@@ -23,6 +23,10 @@ cd ~/claude-peers-mcp
 bun install
 ```
 
+> **Windows (PowerShell):** `~` isn't expanded in command arguments, so give an
+> explicit path — e.g. `git clone https://github.com/louislva/claude-peers-mcp.git C:\Users\you\claude-peers-mcp`,
+> then `cd C:\Users\you\claude-peers-mcp`. (Git Bash expands `~` normally.)
+
 ### 2. Register the MCP server
 
 This makes claude-peers available in every Claude Code session, from any directory:
@@ -32,6 +36,11 @@ claude mcp add --scope user --transport stdio claude-peers -- bun ~/claude-peers
 ```
 
 Replace `~/claude-peers-mcp` with wherever you cloned it.
+
+> **Windows:** claude-peers runs natively on Windows, macOS, Linux, and BSD. On
+> Windows, use the full path to the clone in place of `~` (PowerShell doesn't
+> expand `~` inside arbitrary arguments), e.g.
+> `claude mcp add --scope user --transport stdio claude-peers -- bun C:\Users\you\claude-peers-mcp\server.ts`.
 
 ### 3. Run Claude Code with the channel
 
@@ -107,11 +116,13 @@ bun cli.ts kill-broker       # stop the broker
 
 ## Configuration
 
-| Environment variable | Default              | Description                           |
-| -------------------- | -------------------- | ------------------------------------- |
-| `CLAUDE_PEERS_PORT`  | `7899`               | Broker port                           |
-| `CLAUDE_PEERS_DB`    | `~/.claude-peers.db` | SQLite database path                  |
-| `OPENAI_API_KEY`     | —                    | Enables auto-summary via gpt-5.4-nano |
+| Environment variable | Default                   | Description                           |
+| -------------------- | ------------------------- | ------------------------------------- |
+| `CLAUDE_PEERS_PORT`  | `7899`                    | Broker port                           |
+| `CLAUDE_PEERS_DB`    | `<home>/.claude-peers.db` | SQLite database path                  |
+| `OPENAI_API_KEY`     | —                         | Enables auto-summary via gpt-5.4-nano |
+
+`<home>` is resolved via the OS home directory — `~` on macOS/Linux/BSD, `%USERPROFILE%` on Windows.
 
 ## Requirements
 
