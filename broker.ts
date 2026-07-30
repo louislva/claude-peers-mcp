@@ -25,6 +25,9 @@ import type {
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
 const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+// Undelivered mail older than this is dropped, so an inbox nobody claims
+// cannot grow forever
+const MESSAGE_TTL_MS = 24 * 60 * 60 * 1000;
 
 // --- Database setup ---
 
@@ -58,19 +61,36 @@ db.run(`
   )
 `);
 
-// Clean up stale peers (PIDs that no longer exist) on startup
+// Existing databases predate the alive column
+try {
+  db.run("ALTER TABLE peers ADD COLUMN alive INTEGER NOT NULL DEFAULT 1");
+} catch {
+  // column already exists
+}
+
+// Mark stale peers (PIDs that no longer exist) dead, but KEEP their
+// undelivered mail: a session that restarts in the same directory adopts it on
+// register, so a message sent to a session that is restarting is not silently
+// destroyed. Only mail past its TTL, and dead peers with nothing pending, are
+// purged.
 function cleanStalePeers() {
-  const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
+  const peers = db.query("SELECT id, pid FROM peers WHERE alive = 1").all() as {
+    id: string;
+    pid: number;
+  }[];
   for (const peer of peers) {
     try {
       // Check if process is still alive (signal 0 doesn't kill, just checks)
       process.kill(peer.pid, 0);
     } catch {
-      // Process doesn't exist, remove it
-      db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
-      db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
+      db.run("UPDATE peers SET alive = 0 WHERE id = ?", [peer.id]);
     }
   }
+  const cutoff = new Date(Date.now() - MESSAGE_TTL_MS).toISOString();
+  db.run("DELETE FROM messages WHERE sent_at < ?", [cutoff]);
+  db.run(
+    "DELETE FROM peers WHERE alive = 0 AND id NOT IN (SELECT DISTINCT to_id FROM messages WHERE delivered = 0)"
+  );
 }
 
 cleanStalePeers();
@@ -98,15 +118,15 @@ const deletePeer = db.prepare(`
 `);
 
 const selectAllPeers = db.prepare(`
-  SELECT * FROM peers
+  SELECT * FROM peers WHERE alive = 1
 `);
 
 const selectPeersByDirectory = db.prepare(`
-  SELECT * FROM peers WHERE cwd = ?
+  SELECT * FROM peers WHERE alive = 1 AND cwd = ?
 `);
 
 const selectPeersByGitRoot = db.prepare(`
-  SELECT * FROM peers WHERE git_root = ?
+  SELECT * FROM peers WHERE alive = 1 AND git_root = ?
 `);
 
 const insertMessage = db.prepare(`
@@ -139,13 +159,21 @@ function handleRegister(body: RegisterRequest): RegisterResponse {
   const id = generateId();
   const now = new Date().toISOString();
 
-  // Remove any existing registration for this PID (re-registration)
-  const existing = db.query("SELECT id FROM peers WHERE pid = ?").get(body.pid) as { id: string } | null;
-  if (existing) {
-    deletePeer.run(existing.id);
-  }
+  // Previous incarnations of this session: the same PID (re-registration), or
+  // a dead peer in the same directory (the session restarted). The new peer
+  // adopts their undelivered mail, so a message sent while a session was
+  // restarting still arrives.
+  const previous = db
+    .query("SELECT id FROM peers WHERE pid = ? OR (alive = 0 AND cwd = ?)")
+    .all(body.pid, body.cwd) as { id: string }[];
 
   insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, now, now);
+
+  for (const prev of previous) {
+    db.run("UPDATE messages SET to_id = ? WHERE to_id = ? AND delivered = 0", [id, prev.id]);
+    deletePeer.run(prev.id);
+  }
+
   return { id };
 }
 
@@ -190,16 +218,18 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
       process.kill(p.pid, 0);
       return true;
     } catch {
-      // Clean up dead peer
-      deletePeer.run(p.id);
+      // Mark dead, but keep any undelivered mail for a restarted successor
+      db.run("UPDATE peers SET alive = 0 WHERE id = ?", [p.id]);
       return false;
     }
   });
 }
 
 function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: string } {
-  // Verify target exists
-  const target = db.query("SELECT id FROM peers WHERE id = ?").get(body.to_id) as { id: string } | null;
+  // Verify target exists and is live
+  const target = db
+    .query("SELECT id FROM peers WHERE id = ? AND alive = 1")
+    .get(body.to_id) as { id: string } | null;
   if (!target) {
     return { ok: false, error: `Peer ${body.to_id} not found` };
   }
@@ -220,7 +250,9 @@ function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
 }
 
 function handleUnregister(body: { id: string }): void {
-  deletePeer.run(body.id);
+  // Mark dead rather than delete, so undelivered mail survives for the next
+  // session in this directory; cleanStalePeers purges once the inbox drains
+  db.run("UPDATE peers SET alive = 0 WHERE id = ?", [body.id]);
 }
 
 // --- HTTP Server ---
