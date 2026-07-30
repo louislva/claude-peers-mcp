@@ -10,6 +10,7 @@ export interface Peer {
   summary: string;
   registered_at: string; // ISO timestamp
   last_seen: string; // ISO timestamp
+  alive: number; // 1 = live; 0 = process gone, undelivered mail retained
 }
 
 export interface Message {
