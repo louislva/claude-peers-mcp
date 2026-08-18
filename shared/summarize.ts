@@ -67,6 +67,9 @@ export async function generateSummary(context: {
         // Reasoning tokens come out of the same budget as the answer, so keep
         // the thinking short or a 1-2 sentence summary can be starved.
         reasoning_effort: "low",
+        // The summary lands in a `list_peers` table. Without this the model
+        // answers in three padded sentences with markdown emphasis in them.
+        verbosity: "low",
       }),
       signal: AbortSignal.timeout(8000),
     });
@@ -92,7 +95,19 @@ export async function generateSummary(context: {
       );
       return null;
     }
-    return text;
+    // Belt and braces for the table: drop the markdown emphasis the model adds
+    // anyway, and cap the length at a sentence boundary when there is one.
+    // Deliberately not a sentence-splitting regex — file names like
+    // `server.mjs` carry a dot and the split silently ate the opening clause.
+    const clean = text.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
+    if (clean.length <= 240) return clean;
+    const cut = clean.slice(0, 240);
+    const stop = Math.max(
+      cut.lastIndexOf(". "),
+      cut.lastIndexOf("! "),
+      cut.lastIndexOf("? "),
+    );
+    return (stop > 120 ? cut.slice(0, stop + 1) : cut).trim();
   } catch (e) {
     warn(e instanceof Error ? e.message : String(e));
     return null;
