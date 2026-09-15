@@ -65,3 +65,10 @@ export interface PollMessagesRequest {
 export interface PollMessagesResponse {
   messages: Message[];
 }
+
+// Acknowledges messages as actually delivered (pushed to the client, or read
+// via check_messages) -- separate from polling them, so a poll that can't be
+// delivered (e.g. a failed channel push) leaves them undelivered to retry.
+export interface AckMessagesRequest {
+  ids: number[];
+}
