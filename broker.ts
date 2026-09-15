@@ -19,12 +19,17 @@ import type {
   SendMessageRequest,
   PollMessagesRequest,
   PollMessagesResponse,
+  AckMessagesRequest,
   Peer,
   Message,
 } from "./shared/types.ts";
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
-const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+// HOME is not set by default on Windows (USERPROFILE is the equivalent) --
+// without this fallback the broker crashes at startup with SQLITE_CANTOPEN.
+const DB_PATH =
+  process.env.CLAUDE_PEERS_DB ??
+  `${process.env.HOME ?? process.env.USERPROFILE}/.claude-peers.db`;
 
 // --- Database setup ---
 
@@ -209,14 +214,21 @@ function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: str
 }
 
 function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
+  // Deliberately does NOT mark messages delivered here -- a poll only means
+  // "these are the currently-undelivered messages," not "I successfully
+  // delivered them." The caller acks each message (via /ack-messages) only
+  // once it has actually done something with it (pushed it, or shown it to
+  // the user), so a poll followed by a failed downstream delivery leaves the
+  // message undelivered and it's retried on the next poll instead of being
+  // silently lost.
   const messages = selectUndelivered.all(body.id) as Message[];
-
-  // Mark them as delivered
-  for (const msg of messages) {
-    markDelivered.run(msg.id);
-  }
-
   return { messages };
+}
+
+function handleAckMessages(body: AckMessagesRequest): void {
+  for (const id of body.ids) {
+    markDelivered.run(id);
+  }
 }
 
 function handleUnregister(body: { id: string }): void {
@@ -257,6 +269,9 @@ Bun.serve({
           return Response.json(handleSendMessage(body as SendMessageRequest));
         case "/poll-messages":
           return Response.json(handlePollMessages(body as PollMessagesRequest));
+        case "/ack-messages":
+          handleAckMessages(body as AckMessagesRequest);
+          return Response.json({ ok: true });
         case "/unregister":
           handleUnregister(body as { id: string });
           return Response.json({ ok: true });
