@@ -55,6 +55,15 @@ async function brokerFetch<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function ackMessages(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  try {
+    await brokerFetch("/ack-messages", { ids });
+  } catch (e) {
+    log(`Ack error (messages will be redelivered): ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 async function isBrokerAlive(): Promise<boolean> {
   try {
     const res = await fetch(`${BROKER_URL}/health`, { signal: AbortSignal.timeout(2000) });
@@ -370,6 +379,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             content: [{ type: "text" as const, text: "No new messages." }],
           };
         }
+        // Returning the text to the user right now IS the delivery for this
+        // path, so ack immediately -- unlike pollAndPushMessages, there's no
+        // further push step that could fail after this point.
+        await ackMessages(result.messages.map((m) => m.id));
         const lines = result.messages.map(
           (m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`
         );
@@ -407,6 +420,7 @@ async function pollAndPushMessages() {
   try {
     const result = await brokerFetch<PollMessagesResponse>("/poll-messages", { id: myId });
 
+    const deliveredIds: number[] = [];
     for (const msg of result.messages) {
       // Look up the sender's info for context
       let fromSummary = "";
@@ -426,22 +440,33 @@ async function pollAndPushMessages() {
         // Non-critical, proceed without sender info
       }
 
-      // Push as channel notification — this is what makes it immediate
-      await mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content: msg.text,
-          meta: {
-            from_id: msg.from_id,
-            from_summary: fromSummary,
-            from_cwd: fromCwd,
-            sent_at: msg.sent_at,
+      try {
+        // Push as channel notification — this is what makes it immediate
+        await mcp.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: msg.text,
+            meta: {
+              from_id: msg.from_id,
+              from_summary: fromSummary,
+              from_cwd: fromCwd,
+              sent_at: msg.sent_at,
+            },
           },
-        },
-      });
+        });
 
-      log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+        log(`Pushed message from ${msg.from_id}: ${msg.text.slice(0, 80)}`);
+        // Only ack once the push above actually succeeded -- on Windows this
+        // can silently fail (see #46125 upstream), and a message that never
+        // reached the client must stay undelivered so it's retried on the
+        // next poll instead of being lost.
+        deliveredIds.push(msg.id);
+      } catch (e) {
+        log(`Channel push failed for message ${msg.id} (will retry): ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
+
+    await ackMessages(deliveredIds);
   } catch (e) {
     // Broker might be down temporarily, don't crash
     log(`Poll error: ${e instanceof Error ? e.message : String(e)}`);
