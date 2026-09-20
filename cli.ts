@@ -35,6 +35,18 @@ async function brokerFetch<T>(path: string, body?: unknown): Promise<T> {
 const cmd = process.argv[2];
 
 switch (cmd) {
+  case "inbox":
+  case "ack":
+  case "bind":
+  case "recover": {
+    const id=process.argv[3];
+    if (!id) { console.error("Expected peer ID"); process.exit(1); }
+    const path=cmd==="inbox" ? "/poll-messages":cmd==="ack" ? "/ack-messages":cmd==="bind" ? "/bind-session":"/recover-inbox";
+    const body=cmd==="inbox" ? {id,protocol:2,force:true}:cmd==="ack" ? {id,message_ids:process.argv.slice(4).map(Number)}:cmd==="bind" ? {id,session_key:process.argv[4]}:{id,from_id:process.argv[4]};
+    try { console.log(JSON.stringify(await brokerFetch(path,body),null,2)); }
+    catch(e) { console.error(String(e)); process.exitCode=1; }
+    break;
+  }
   case "status": {
     try {
       const health = await brokerFetch<{ status: string; peers: number }>("/health");
@@ -88,6 +100,7 @@ switch (cmd) {
         scope: "machine",
         cwd: "/",
         git_root: null,
+        include_offline: process.argv.includes("--all"),
       });
 
       if (peers.length === 0) {
@@ -134,7 +147,7 @@ switch (cmd) {
       const health = await brokerFetch<{ status: string; peers: number }>("/health");
       console.log(`Broker has ${health.peers} peer(s). Shutting down...`);
       // Find and kill the broker process on the port
-      const proc = Bun.spawnSync(["lsof", "-ti", `:${BROKER_PORT}`]);
+      const proc = Bun.spawnSync(["lsof", "-t", `-iTCP:${BROKER_PORT}`, "-sTCP:LISTEN"]);
       const pids = new TextDecoder()
         .decode(proc.stdout)
         .trim()
@@ -156,6 +169,11 @@ switch (cmd) {
 Usage:
   bun cli.ts status          Show broker status and all peers
   bun cli.ts peers           List all peers
+  bun cli.ts peers --all     Include preserved offline inboxes
+  bun cli.ts inbox <id>      Read pending messages without acknowledging
+  bun cli.ts ack <id> <message-id...>  Acknowledge messages after reading
+  bun cli.ts bind <id> <session-key>   Bind a verified session identity
+  bun cli.ts recover <id> <offline-id> Recover pending mail explicitly
   bun cli.ts send <id> <msg> Send a message to a peer
   bun cli.ts kill-broker     Stop the broker daemon`);
 }

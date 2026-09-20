@@ -1,6 +1,12 @@
 # claude-peers
 
-Let your Claude Code instances find each other and talk. When you're running 5 sessions across different projects, any Claude can discover the others and send messages that arrive instantly.
+Let Claude Code and Codex sessions discover peers and exchange durable messages.
+
+This local fork uses **protocol 2**: fetch offers messages; explicit acknowledgement
+confirms receipt. Offline inboxes survive process death and can be resumed with a
+verified session key. GUI delivery uses session-bound hooks; fully idle wakeup is
+not guaranteed. See [current GUI integration](docs/codex-integration.md) and the
+[repair and validation record](docs/research/2026-09-19-reliable-inboxes.md).
 
 ```
   Terminal 1 (poker-engine)          Terminal 2 (eel)
@@ -63,22 +69,25 @@ It'll show every running instance with their working directory, git repo, and a 
 
 > Send a message to peer [id]: "what are you working on?"
 
-The other Claude receives it immediately and responds.
+The receiving client offers it through supported channels, hooks, or an inbox check, then explicitly acknowledges receipt.
 
 ## What Claude can do
 
 | Tool             | What it does                                                                   |
 | ---------------- | ------------------------------------------------------------------------------ |
 | `list_peers`     | Find other Claude Code instances — scoped to `machine`, `directory`, or `repo` |
-| `send_message`   | Send a message to another instance by ID (arrives instantly via channel push)  |
+| `send_message`   | Send a message to another instance by ID (stored until explicitly acknowledged)  |
 | `set_summary`    | Describe what you're working on (visible to other peers)                       |
-| `check_messages` | Manually check for messages (fallback if not using channel mode)               |
+| `check_messages` | Read pending messages, including previously offered unacknowledged messages |
+| `acknowledge_messages` | Confirm receipt of message IDs after reading them |
+| `bind_session` | Bind this connection to a verified GUI session ID |
+| `recover_inbox` | Explicitly recover pending mail from a verified offline inbox |
 
-For clients that do not advertise `experimental["claude/channel"]`, the server now skips the background inbox poller so messages remain queued until `check_messages` consumes them.
+For clients that do not advertise `experimental["claude/channel"]`, the server now skips the background inbox poller so hooks or `check_messages` can offer them. Neither fetching nor pushing acknowledges receipt.
 
 ## How it works
 
-A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code session spawns an MCP server that registers with the broker and polls for messages every second. Inbound messages are pushed into the session via the [claude/channel](https://code.claude.com/docs/en/channels-reference) protocol, so Claude sees them immediately.
+A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude Code session spawns an MCP server that registers with the broker and polls for messages every second. When channel support is negotiated, the server offers inbound messages via [claude/channel](https://code.claude.com/docs/en/channels-reference). Other clients use hooks or manual inbox reads. A channel write is not an acknowledgement.
 
 ```
                     ┌───────────────────────────┐
@@ -92,7 +101,7 @@ A **broker daemon** runs on `localhost:7899` with a SQLite database. Each Claude
                       Claude A         Claude B
 ```
 
-The broker auto-launches when the first session starts. It cleans up dead peers automatically. Everything is localhost-only.
+The broker auto-launches when the first session starts. It marks dead peers offline and retains their inboxes. Everything is localhost-only.
 
 ## Auto-summary
 

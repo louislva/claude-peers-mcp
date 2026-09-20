@@ -1,273 +1,40 @@
 #!/usr/bin/env bun
-/**
- * claude-peers broker daemon
- *
- * A singleton HTTP server on localhost:7899 backed by SQLite.
- * Tracks all registered Claude Code peers and routes messages between them.
- *
- * Auto-launched by the MCP server if not already running.
- * Run directly: bun broker.ts
- */
+import { PeerStore } from "./shared/store.ts";
+import { receiptEnvelope } from "./shared/receipts.ts";
 
-import { Database } from "bun:sqlite";
-import type {
-  RegisterRequest,
-  RegisterResponse,
-  HeartbeatRequest,
-  SetSummaryRequest,
-  ListPeersRequest,
-  SendMessageRequest,
-  PollMessagesRequest,
-  PollMessagesResponse,
-  Peer,
-  Message,
-} from "./shared/types.ts";
-
-const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
+const PORT = Number(process.env.CLAUDE_PEERS_PORT ?? "7899");
 const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+const store = new PeerStore(DB_PATH);
+setInterval(()=>store.cleanStale(),30000).unref();
 
-// --- Database setup ---
-
-const db = new Database(DB_PATH);
-db.run("PRAGMA journal_mode = WAL");
-db.run("PRAGMA busy_timeout = 3000");
-
-db.run(`
-  CREATE TABLE IF NOT EXISTS peers (
-    id TEXT PRIMARY KEY,
-    pid INTEGER NOT NULL,
-    cwd TEXT NOT NULL,
-    git_root TEXT,
-    tty TEXT,
-    summary TEXT NOT NULL DEFAULT '',
-    registered_at TEXT NOT NULL,
-    last_seen TEXT NOT NULL
-  )
-`);
-
-db.run(`
-  CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_id TEXT NOT NULL,
-    to_id TEXT NOT NULL,
-    text TEXT NOT NULL,
-    sent_at TEXT NOT NULL,
-    delivered INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (from_id) REFERENCES peers(id),
-    FOREIGN KEY (to_id) REFERENCES peers(id)
-  )
-`);
-
-// Clean up stale peers (PIDs that no longer exist) on startup
-function cleanStalePeers() {
-  const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
-  for (const peer of peers) {
+const server = Bun.serve({
+  port:PORT, hostname:"127.0.0.1",
+  async fetch(req): Promise<Response> {
+    const path=new URL(req.url).pathname;
+    if (req.method==="GET" && path==="/health") return Response.json({status:"ok",protocol:2,version:"0.2.0",pid:process.pid,port:server.port,peers:store.list("machine").length});
+    if (req.method!=="POST") return Response.json({error:"not found"},{status:404});
     try {
-      // Check if process is still alive (signal 0 doesn't kill, just checks)
-      process.kill(peer.pid, 0);
-    } catch {
-      // Process doesn't exist, remove it
-      db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
-      db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
-    }
-  }
-}
-
-cleanStalePeers();
-
-// Periodically clean stale peers (every 30s)
-setInterval(cleanStalePeers, 30_000);
-
-// --- Prepared statements ---
-
-const insertPeer = db.prepare(`
-  INSERT INTO peers (id, pid, cwd, git_root, tty, summary, registered_at, last_seen)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`);
-
-const updateLastSeen = db.prepare(`
-  UPDATE peers SET last_seen = ? WHERE id = ?
-`);
-
-const updateSummary = db.prepare(`
-  UPDATE peers SET summary = ? WHERE id = ?
-`);
-
-const deletePeer = db.prepare(`
-  DELETE FROM peers WHERE id = ?
-`);
-
-const selectAllPeers = db.prepare(`
-  SELECT * FROM peers
-`);
-
-const selectPeersByDirectory = db.prepare(`
-  SELECT * FROM peers WHERE cwd = ?
-`);
-
-const selectPeersByGitRoot = db.prepare(`
-  SELECT * FROM peers WHERE git_root = ?
-`);
-
-const insertMessage = db.prepare(`
-  INSERT INTO messages (from_id, to_id, text, sent_at, delivered)
-  VALUES (?, ?, ?, ?, 0)
-`);
-
-const selectUndelivered = db.prepare(`
-  SELECT * FROM messages WHERE to_id = ? AND delivered = 0 ORDER BY sent_at ASC
-`);
-
-const markDelivered = db.prepare(`
-  UPDATE messages SET delivered = 1 WHERE id = ?
-`);
-
-// --- Generate peer ID ---
-
-function generateId(): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let id = "";
-  for (let i = 0; i < 8; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return id;
-}
-
-// --- Request handlers ---
-
-function handleRegister(body: RegisterRequest): RegisterResponse {
-  const id = generateId();
-  const now = new Date().toISOString();
-
-  // Remove any existing registration for this PID (re-registration)
-  const existing = db.query("SELECT id FROM peers WHERE pid = ?").get(body.pid) as { id: string } | null;
-  if (existing) {
-    deletePeer.run(existing.id);
-  }
-
-  insertPeer.run(id, body.pid, body.cwd, body.git_root, body.tty, body.summary, now, now);
-  return { id };
-}
-
-function handleHeartbeat(body: HeartbeatRequest): void {
-  updateLastSeen.run(new Date().toISOString(), body.id);
-}
-
-function handleSetSummary(body: SetSummaryRequest): void {
-  updateSummary.run(body.summary, body.id);
-}
-
-function handleListPeers(body: ListPeersRequest): Peer[] {
-  let peers: Peer[];
-
-  switch (body.scope) {
-    case "machine":
-      peers = selectAllPeers.all() as Peer[];
-      break;
-    case "directory":
-      peers = selectPeersByDirectory.all(body.cwd) as Peer[];
-      break;
-    case "repo":
-      if (body.git_root) {
-        peers = selectPeersByGitRoot.all(body.git_root) as Peer[];
-      } else {
-        // No git root, fall back to directory
-        peers = selectPeersByDirectory.all(body.cwd) as Peer[];
+      const body=await req.json() as Record<string,any>;
+      if (!body || typeof body!=="object" || Array.isArray(body)) throw new Error("Expected an object");
+      switch(path) {
+        case "/register": return Response.json(store.register(body as any));
+        case "/heartbeat": store.heartbeat(body.id); return Response.json({ok:true});
+        case "/set-summary": return Response.json(store.setSummary(body.id,body.summary));
+        case "/list-peers": return Response.json(store.list(body.scope,body.cwd,body.git_root,body.exclude_id,body.include_offline===true));
+        case "/send-message": return Response.json(store.send(body.from_id,body.to_id,body.text));
+        case "/poll-messages": {
+          const messages=store.poll(body.id,body.force===true);
+          // Old clients omit IDs. Include a receipt envelope for CLI ACKs.
+          return Response.json({messages:body.protocol===2 ? messages : messages.map(m=>({...m,text:receiptEnvelope([m],store.peer(body.id).id)}))});
+        }
+        case "/ack-messages": return Response.json(store.acknowledge(body.id,body.message_ids));
+        case "/bind-session": return Response.json(store.bindSession(body.id,body.session_key));
+        case "/resolve-session": return Response.json({peer:store.resolveSession(body.session_key)});
+        case "/recover-inbox": return Response.json(store.recover(body.from_id,body.id));
+        case "/unregister": store.unregister(body.id); return Response.json({ok:true});
+        default: return Response.json({error:"not found"},{status:404});
       }
-      break;
-    default:
-      peers = selectAllPeers.all() as Peer[];
+    } catch(e) { return Response.json({error:e instanceof Error ? e.message:String(e)},{status:400}); }
   }
-
-  // Exclude the requesting peer
-  if (body.exclude_id) {
-    peers = peers.filter((p) => p.id !== body.exclude_id);
-  }
-
-  // Verify each peer's process is still alive
-  return peers.filter((p) => {
-    try {
-      process.kill(p.pid, 0);
-      return true;
-    } catch {
-      // Clean up dead peer
-      deletePeer.run(p.id);
-      return false;
-    }
-  });
-}
-
-function handleSendMessage(body: SendMessageRequest): { ok: boolean; error?: string } {
-  // Verify target exists
-  const target = db.query("SELECT id FROM peers WHERE id = ?").get(body.to_id) as { id: string } | null;
-  if (!target) {
-    return { ok: false, error: `Peer ${body.to_id} not found` };
-  }
-
-  insertMessage.run(body.from_id, body.to_id, body.text, new Date().toISOString());
-  return { ok: true };
-}
-
-function handlePollMessages(body: PollMessagesRequest): PollMessagesResponse {
-  const messages = selectUndelivered.all(body.id) as Message[];
-
-  // Mark them as delivered
-  for (const msg of messages) {
-    markDelivered.run(msg.id);
-  }
-
-  return { messages };
-}
-
-function handleUnregister(body: { id: string }): void {
-  deletePeer.run(body.id);
-}
-
-// --- HTTP Server ---
-
-Bun.serve({
-  port: PORT,
-  hostname: "127.0.0.1",
-  async fetch(req) {
-    const url = new URL(req.url);
-    const path = url.pathname;
-
-    if (req.method !== "POST") {
-      if (path === "/health") {
-        return Response.json({ status: "ok", peers: (selectAllPeers.all() as Peer[]).length });
-      }
-      return new Response("claude-peers broker", { status: 200 });
-    }
-
-    try {
-      const body = await req.json();
-
-      switch (path) {
-        case "/register":
-          return Response.json(handleRegister(body as RegisterRequest));
-        case "/heartbeat":
-          handleHeartbeat(body as HeartbeatRequest);
-          return Response.json({ ok: true });
-        case "/set-summary":
-          handleSetSummary(body as SetSummaryRequest);
-          return Response.json({ ok: true });
-        case "/list-peers":
-          return Response.json(handleListPeers(body as ListPeersRequest));
-        case "/send-message":
-          return Response.json(handleSendMessage(body as SendMessageRequest));
-        case "/poll-messages":
-          return Response.json(handlePollMessages(body as PollMessagesRequest));
-        case "/unregister":
-          handleUnregister(body as { id: string });
-          return Response.json({ ok: true });
-        default:
-          return Response.json({ error: "not found" }, { status: 404 });
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return Response.json({ error: msg }, { status: 500 });
-    }
-  },
 });
-
-console.error(`[claude-peers broker] listening on 127.0.0.1:${PORT} (db: ${DB_PATH})`);
+console.error(`[claude-peers broker] protocol 2 listening on 127.0.0.1:${server.port}`);

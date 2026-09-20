@@ -1,80 +1,102 @@
-# Codex integration — joining the peer network from OpenAI Codex
+# GUI session delivery and recovery
 
-Status: **live** (2026-08-10). Codex (GUI app and CLI, ≥0.144) joins the same
-broker as Claude Code sessions and is a first-class peer: it registers,
-heartbeats, appears in `list_peers`, and can `send_message` /
-`check_messages` / `set_summary` identically.
+Updated 2026-09-19. This supersedes the 2026-08-10 PID-map/single-consumption
+implementation. It preserves the existing MCP integration and GUI workflow.
 
-## How
+## Receipt contract
 
-Nothing in this server is Claude-specific except the push path. Registration,
-identity, discovery, and mailboxes are a plain MCP stdio server over the
-localhost broker (`127.0.0.1:7899`, SQLite at `~/.claude-peers.db`). Codex
-mounts it via `~/.codex/config.toml` (shared by the desktop app, CLI, and IDE
-extension):
+Protocol 2 offers pending messages without consuming them. Only
+`acknowledge_messages` or `cli.ts ack` sets `acknowledged_at` and `delivered=1`.
+Acknowledgement means the agent received the text; it does not mean the agent
+accepted or completed requested work. Clients must deduplicate work by message ID.
 
-```toml
-[mcp_servers.claude-peers]
-command = "/Users/kielay/.bun/bin/bun"
-args = ["/Users/kielay/MCP/servers/claude-peers-mcp/server.ts"]
-startup_timeout_sec = 60
+Automatic offers have a 30-second lease. A failed hook, lost response, dropped
+channel notification or crash cannot acknowledge the message. It becomes eligible
+again after expiry; a manual `check_messages` bypasses the lease. Explicit
+acknowledgement is recipient-scoped and idempotent. Old clients receive receipt IDs
+and a CLI acknowledgement command in the message envelope without a GUI restart.
+
+Legacy rows already marked delivered remain unchanged with unknown receipt status
+(`acknowledged_at` is null). They are not automatically replayed. Already-deleted
+messages cannot be reconstructed by this change.
+
+## Bind the actual session
+
+Codex desktop tasks can share one parent process and working directory. Neither is
+an identity. The old `~/.claude-peers/sessions/<parent-pid>.json` lookup was unsafe;
+new code neither writes nor reads those files.
+
+Hooks read their supplied `session_id` and resolve it with the broker. An unbound
+main task receives a setup context asking its own MCP connection to call
+`set_summary` with `[session:SESSION_ID]` followed by its work summary. This marker
+is consumed by the broker and removed from the displayed summary. It works with
+already-running MCP clients. New clients also expose `bind_session`. When available
+at MCP launch, `CLAUDE_PEERS_SESSION_KEY` or `CODEX_THREAD_ID` binds directly.
+
+The key must identify this exact conversation. Never use cwd, a generic agent name,
+a shared PID, or an ID taken from a different task. A live owner cannot be replaced.
+A resumed session with the same verified key reuses its original peer ID and inbox.
+Provisional IDs from a new MCP connection redirect to the stable identity after
+binding. Independent sessions remain independent, even in the same repository.
+
+Hooks skip explicit subagent contexts and conflicting transcript/environment
+identity hints because Codex may report a parent's session ID for child hooks.
+No full GUI subagent interoperability claim has been validated.
+
+## Hands-on delivery
+
+- `UserPromptSubmit`: offer mail when the user starts a turn.
+- `PostToolUse`: offer mail after a supported tool result, during active work.
+  The hook uses `hookSpecificOutput.additionalContext`, not ignored plain text
+  and not a blocking result that would replace the tool's actual output.
+- `Stop`: request one continuation if new mail is pending. When
+  `stop_hook_active` is true it does nothing, preventing an endless stop loop.
+
+The existing prompt/stop hooks point to `hooks/inbox-hook.ts context|stop`.
+A Codex PostToolUse hook was added in `~/.codex/config.toml`. No hook trust records
+were edited. New definitions require the user's normal Codex hook review/trust;
+existing running tasks may also need a configuration reload. The source scripts
+have isolated integration coverage, but live automatic GUI delivery must be
+observed separately after trust/loading.
+
+A fully idle GUI task has no tool boundary. This implementation does not claim an
+unsupported external wake API. Human messages continue to use the app's own
+steering behavior; peer messages become context at supported hook boundaries.
+
+Official reference: <https://learn.chatgpt.com/docs/hooks> (retrieved 2026-09-19).
+The earlier `docs/plugin.md` channel investigation is historical; this repair
+leaves the existing channel capability gate in place and does not depend on it.
+
+## Offline recovery and migration
+
+Dead-process cleanup and unregister mark a peer offline; they never delete pending
+messages. Discovery defaults to online peers. `list_peers(include_offline=true)`
+or `bun cli.ts peers --all` shows retained inboxes. Existing orphaned pending rows
+get clearly labelled offline inbox records during migration; they are not assigned
+to a new session based on guesses.
+
+For an old inbox without a recoverable session key, verify the source identity and
+use `recover_inbox(from_id)` on the intended receiving session, or:
+
+```sh
+bun cli.ts recover <destination-peer-id> <verified-offline-source-id>
 ```
 
-Codex-side protocol guidance (poll cadence, reply etiquette, injection
-caution) lives in `~/.codex/AGENTS.md`.
+Recovery transfers only pending messages and writes an audit row. It refuses a
+live source. Historic delivered rows remain untouched. Inbox storage is for one
+trusted OS user; these IDs are not credentials or a multi-tenant security boundary.
 
-## The asymmetry: push vs. poll
+## Diagnostics
 
-- **Claude sessions get push in principle** — the server streams inbound
-  messages as `notifications/claude/channel`, rendered as a `<channel>` turn
-  mid-session. **In practice (observed 2026-08-10, Claude Code desktop app):
-  the push did not fire and the Claude session had to poll
-  `check_messages`.** Diagnosed 2026-08-10 — two independent causes, both in
-  `docs/plugin.md`: Claude Code never advertises the
-  `experimental["claude/channel"]` *client* capability that
-  `startInboundMessagePolling()` gates on, and GUI sessions can only enable a
-  channel for a plugin on Anthropic's remote allowlist. Until both are
-  addressed, the bridge stays poll-both-ways: every agent polls at task
-  boundaries.
-- **Codex is poll-only.** Codex does not advertise the
-  `experimental["claude/channel"]` client capability, so
-  `startInboundMessagePolling()` skips the background poller for that
-  connection (commit `d1413d7`) and messages queue durably in SQLite until
-  Codex calls `check_messages`. Nothing is lost; nothing interrupts.
+```sh
+bun cli.ts status
+bun cli.ts peers --all
+bun cli.ts inbox <peer-id>
+bun cli.ts ack <peer-id> <message-id> [more-message-ids]
+bun test
+./node_modules/.bin/tsc --noEmit
+```
 
-## Hook-based delivery (BUILT 2026-08-10) — both harnesses
-
-`hooks/inbox-hook.ts` drains this session's mailbox and injects messages
-into model context. Two modes: `context` (print messages on stdout —
-UserPromptSubmit adds them to context) and `stop` (emit
-`{"decision":"block","reason":<messages>}` so the harness runs one more
-turn to handle them; silent when the mailbox is empty).
-
-**Self-addressing:** server.ts now writes
-`~/.claude-peers/sessions/<harness-pid>.json` at registration (removed on
-clean exit). The hook walks its own ancestor PIDs to find that file — hook
-and MCP server share the harness as a common ancestor. `--peer-id <id>`
-bypasses resolution for testing. Draining uses `/poll-messages`
-(single-consumption), so hooks and `check_messages` never double-deliver.
-
-**Wiring:** Claude Code — `~/.claude/settings.json` hooks on
-`UserPromptSubmit` (context) and `Stop` (stop), exec-form, 10 s timeout.
-Codex — `~/.codex/config.toml` `[[hooks.UserPromptSubmit]]` and
-`[[hooks.Stop]]`. Restart sessions to activate: the session-map file only
-exists for servers started after this change, and Codex prompts once to
-trust the new hooks.
-
-**Loop caution:** two agents with stop-block hooks replying unconditionally
-can ping-pong; the injected envelope instructs reply-only-when-needed.
-
-Remaining (not built): a `wait_for_message` long-poll tool for deliberate
-stand-by phases; macOS banner on message arrival while idle (the human's
-notification, via terminal-notifier or Codex `notify`).
-
-Hard limits confirmed upstream: no arbitrary injection into a running Codex
-GUI thread (exclusive thread-writer lock, openai/codex#37450);
-`codex exec resume` cannot attach to a GUI-open thread; MCP server-initiated
-notifications are not surfaced to the Codex model. Prior art:
-[codex-claude-bridge](https://github.com/abhishekgahlot2/codex-claude-bridge)
-(blocking-tool design worth cribbing),
-[agent-bus](https://github.com/MustaphaSteph/agent-bus).
+The live health endpoint reports protocol 2/version 0.2.0. Source updates to an MCP
+server take effect after that connection restarts; the broker's legacy envelope
+and summary-binding support keep existing connections usable in the meantime.
