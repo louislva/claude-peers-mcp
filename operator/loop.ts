@@ -30,11 +30,12 @@ const deps={
     const exitCode=await p.exited;clearTimeout(timer);
     return {exitCode,stderr:await new Response(p.stderr).text()};
   },
-  emit:(line:string)=>console.log(line),
+  emit:(line:string)=>{guard();console.log(line);},
   // The recheck runs immediately before every dispatch, so the ownership guard
   // here stops a displaced or orphaned loop before any ring (claims it leaves
   // behind expire and are fenced).
-  recheck:async(host:string,ids:number[],attemptId?:number)=>{guard();return (await post<{message_ids:number[]}>("/recheck-wake",{host_session_id:host,message_ids:ids,attempt_id:attemptId})).message_ids;},
+  // Guarded on both sides of the await: ownership can be lost while the broker answers.
+  recheck:async(host:string,ids:number[],attemptId?:number)=>{guard();const r=(await post<{message_ids:number[]}>("/recheck-wake",{host_session_id:host,message_ids:ids,attempt_id:attemptId})).message_ids;guard();return r;},
   codexBin:process.env.CODEX_BIN ?? "/opt/homebrew/bin/codex",
   selfHostId:process.env.CLAUDE_CODE_HOST_SESSION_ID,
 };
@@ -45,7 +46,7 @@ const supervise={
   whyUnreachable:(peer:{pid:number,session_key:string|null})=>peer.session_key && liveEvidence.codexThreadArchived?.(peer.session_key) ? "Codex thread is archived; unarchive it or re-address the message":null,
   autoWake:(id:string,address:{harness:string,host_session_id:string})=>post<{wake_policy:string}>("/auto-wake",{id,...address}),
   send:async(to:string,text:string,replyTo:number)=>{guard();await post("/send-message",{from_id:"operator",to_id:to,text,reply_to:replyTo});},
-  emit:(line:string)=>console.log(line),
+  emit:(line:string)=>{guard();console.log(line);},
   markReported:async(id:number,reason:string)=>{await post("/mark-problem-reported",{message_id:id,reason});},
 };
 async function pass(){
@@ -57,7 +58,7 @@ async function pass(){
   await superviseDelivery(problems,supervise as any,seen);
   // Alerts, never gates: the operator pushes these to Kiel's phone.
   const {alerts}=await post<{alerts:{kind:string,id:string,count:number,participants?:string[]}[]}>("/activity-alerts");
-  for(const a of alerts) console.log(a.kind==="conversation"
+  for(const a of alerts) deps.emit(a.kind==="conversation"
     ? `ACTIVITY conversation #${a.id} reached ${a.count} messages among ${(a.participants??[]).join(", ")}`
     : `ACTIVITY peer ${a.id} was rung ${a.count} times in the last hour`);
 }
@@ -75,16 +76,16 @@ function guard(){ if(!mayRing({supervisorPid:SUPERVISOR_PID,lockPid:readLockPid(
 // Liveness for the operator's heartbeat (health.ts), stamped every 5s even
 // mid-pass: a slow Codex dispatch is busy, not down.
 let passStartedAt:number|null=null;
-const writeStamp=()=>{try{writeFileSync(PASS_STAMP,JSON.stringify({pid:process.pid,at:Date.now(),pass_started_at:passStartedAt}));}catch{}};
+const writeStamp=()=>{guard();try{writeFileSync(PASS_STAMP,JSON.stringify({pid:process.pid,at:Date.now(),pass_started_at:passStartedAt}));}catch{}};
 const ROOT=new URL("..",import.meta.url).pathname;
 const sources=()=>["operator","shared"].flatMap(d=>readdirSync(ROOT+d).filter(f=>f.endsWith(".ts")&&!f.endsWith(".test.ts")).map(f=>`${ROOT}${d}/${f}`));
 const stamp=()=>sources().map(f=>`${f}:${statSync(f).mtimeMs}`).join("|");
 const startedWith=stamp();
 if(process.argv.includes("--once")) await pass();
 else {
-  setInterval(()=>{guard();writeStamp();},5000);
+  setInterval(writeStamp,5000);
   for(;;){
-    guard(); // before stamping: a displaced loop must not overwrite the owner's liveness
+    // writeStamp guards first: a displaced loop never overwrites the owner's liveness
     passStartedAt=Date.now();writeStamp();
     try{await pass();}catch(e){console.error(String(e));}
     passStartedAt=null;writeStamp();

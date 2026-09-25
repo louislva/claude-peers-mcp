@@ -34,7 +34,16 @@ if (prev && prev !== process.pid && commandOf(prev).includes("operator/watch.ts"
 }
 
 let child: ReturnType<typeof Bun.spawn> | null = null;
-const shutdown = () => { child?.kill(); process.exit(0); };
+// Replaced by a newer supervisor → say so, so the operator does NOT re-arm
+// (re-arming would displace the new owner: ownership ping-pong). Stopped for
+// any other reason (Monitor expiry, TaskStop) → exit silently; the operator
+// re-arms on expiry and not after a deliberate close.
+const shutdown = () => {
+  child?.kill();
+  const owner = readLockPid();
+  if (owner && owner !== process.pid) console.log(`DISPLACED switchboard now owned by supervisor ${owner}; do not re-arm`);
+  process.exit(0);
+};
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 

@@ -55,7 +55,9 @@ The heartbeat exists because a lapsed watcher is silent: on 2026-09-25 it lapsed
 
 **`ACTIVITY …`**: a conversation reached another 25 messages, or a peer was rung more than 20 times in an hour. Send Kiel a **PushNotification** with the line as-is. **Don't stop, slow or gate anything.** Long-running agent work is often intended, and deciding to intervene is Kiel's job, not the switchboard's.
 
-**The Monitor ending for any reason** (expiry, exit, crash, or being replaced): re-arm Monitor **immediately** with the same command, *before* anything else, including answering Kiel. The only exception is when you closed the switchboard yourself on Kiel's request (see Close). No need to tell Kiel unless re-arming fails. Code reloads no longer end the Monitor; the supervisor handles them.
+**`DISPLACED …`**: a newer switchboard took over, and this Monitor is ending. **Don't re-arm for it.** Re-arming would displace the new owner and start a ping-pong. The heartbeat will catch it if the new owner dies.
+
+**The Monitor ending for any other reason** (expiry, exit, crash): re-arm Monitor **immediately** with the same command, *before* anything else, including answering Kiel. The exceptions are a Monitor whose last line was `DISPLACED`, and when you closed the switchboard yourself on Kiel's request (see Close). No need to tell Kiel unless re-arming fails. Code reloads no longer end the Monitor; the supervisor handles them.
 
 **`WATCHER-ERROR …`**: the worker loop has crashed three times in a row (the supervisor keeps restarting it). It prints once per crash streak. Send Kiel a **PushNotification** with the line.
 
