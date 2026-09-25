@@ -52,3 +52,11 @@ test("a failing bounce is reported as an operator error and retried, and does no
  expect(log.emitted.filter(l=>l.startsWith("OPERATOR-ERROR"))).toHaveLength(2);
  expect(seen.size).toBe(0);
 });
+
+test("an already-reported unaddressed recipient keeps being connected when evidence appears, without repeat reports",async()=>{
+ const {d,log,seen}=deps({resolve:()=>null});
+ await superviseDelivery([P("no-wake-address",{already_reported:true})],d,seen);
+ expect(log.emitted).toEqual([]);expect(log.sent).toEqual([]);
+ const ok=deps();await superviseDelivery([P("no-wake-address",{already_reported:true})],ok.d,ok.seen);
+ expect(ok.log.autoWake).toHaveLength(1);
+});

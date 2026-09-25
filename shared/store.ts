@@ -290,7 +290,10 @@ export class PeerStore {
       else if (r.wake_policy !== "on" || !r.host_session_id) out.push({...base,reason:"no-wake-address"});
       else if (r.woken_at !== null && r.woken_at <= now - 2*o.receiptTimeoutMs) out.push({...base,reason:"woken-not-picked-up"});
     }
-    return out.filter((p,i)=>rows.find(r=>r.id===p.message_id)?.problem_reported !== p.reason);
+    // Reported problems are not reported again. Unaddressed ones stay listed
+    // (flagged) so the operator keeps trying to connect them from evidence.
+    return out.flatMap(p => rows.find(r=>r.id===p.message_id)?.problem_reported !== p.reason ? [p]
+      : p.reason === "no-wake-address" ? [{...p,already_reported:true}] : []);
   }
   /** Idempotent: record that the operator reported/bounced this message for this reason. */
   markProblemReported(id: number, reason: string) {
@@ -304,7 +307,7 @@ export class PeerStore {
 }
 
 export type WakeHarness = "codex" | "claude-desktop";
-export interface DeliveryProblem { message_id: number; from_id: string; to_id: string; reason: string; detail?: string }
+export interface DeliveryProblem { message_id: number; from_id: string; to_id: string; reason: string; detail?: string; already_reported?: boolean }
 export interface WakeBatch { peer_id: string; harness: WakeHarness; host_session_id: string; message_ids: number[] }
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 // Host ids reach a shell (`codex queue --thread`) and a session tool, so they

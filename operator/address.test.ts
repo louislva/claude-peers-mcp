@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { resolveAddress } from "./address.ts";
+import { resolveAddress, codexThreadExistsIn } from "./address.ts";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const env=(m:Record<number,string>)=>(pid:number)=>m[pid]??"";
 test("a Claude desktop peer's address is read from its MCP server's own environment",()=>{
@@ -16,4 +19,14 @@ test("the env address must belong to the same session the peer is bound to",()=>
 test("no evidence, no address: the operator never guesses",()=>{
  expect(resolveAddress({pid:5,session_key:null},{processEnv:env({}),codexThreadExists:()=>true})).toBeNull();
  expect(resolveAddress({pid:5,session_key:"not-a-thread"},{processEnv:env({}),codexThreadExists:()=>true})).toBeNull();
+});
+
+test("Codex thread lookup survives stray files like .DS_Store at any level",()=>{
+ const root=mkdtempSync(join(tmpdir(),"codex-sessions-"));
+ writeFileSync(join(root,".DS_Store"),"x");mkdirSync(join(root,"2026","09","23"),{recursive:true});
+ writeFileSync(join(root,"2026",".DS_Store"),"x");
+ writeFileSync(join(root,"2026","09","23","rollout-2026-09-23T15-12-45-01a0cfaf-460b-7ff3-a3b3-b7fc168b74f1.jsonl"),"{}");
+ expect(codexThreadExistsIn(root,"01a0cfaf-460b-7ff3-a3b3-b7fc168b74f1")).toBe(true);
+ expect(codexThreadExistsIn(root,"01a0cfaf-460b-7ff3-a3b3-b7fc168b74f2")).toBe(false);
+ expect(codexThreadExistsIn(root,"*")).toBe(false);
 });

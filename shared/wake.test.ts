@@ -188,7 +188,7 @@ describe("receipts for the operator's own actions are durable",()=>{
   const f=fixture();const {id}=f.store.send(f.sender,f.codex,"x");f.advance(121_000);
   expect(f.store.deliveryProblems()).toHaveLength(1);
   f.store.markProblemReported(id,"no-wake-address");f.store.markProblemReported(id,"no-wake-address");
-  expect(f.store.deliveryProblems()).toEqual([]);
+  expect(f.store.deliveryProblems()).toEqual([{message_id:id,from_id:f.sender,to_id:f.codex,reason:"no-wake-address",already_reported:true}]);
   f.store.optOut(f.codex);expect(f.store.deliveryProblems().map(p=>p.reason)).toEqual(["recipient-opted-out"]);
  });
  test("the operator may thread a bounce onto any message; peers still may not reply to conversations they are not in",()=>{

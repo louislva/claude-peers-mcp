@@ -1,4 +1,3 @@
-import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -25,14 +24,14 @@ export function resolveAddress(peer: {pid:number,session_key:string|null}, ev: A
   return null;
 }
 
+/** True if a Codex rollout file for this thread exists under root (tolerates stray files like .DS_Store). */
+export function codexThreadExistsIn(root: string, threadId: string): boolean {
+  if (!UUID.test(threadId)) return false;
+  for (const _ of new Bun.Glob(`*/*/*/rollout-*-${threadId}.jsonl`).scanSync({cwd:root,onlyFiles:true})) return true;
+  return false;
+}
+
 export const liveEvidence: AddressEvidence = {
   processEnv: pid => new TextDecoder().decode(Bun.spawnSync(["ps","eww","-o","command=","-p",String(pid)]).stdout),
-  codexThreadExists: threadId => {
-    const root=join(process.env.HOME ?? "",".codex","sessions");
-    try {
-      for (const y of readdirSync(root)) for (const m of readdirSync(join(root,y))) for (const d of readdirSync(join(root,y,m)))
-        if (readdirSync(join(root,y,m,d)).some(f=>f.endsWith(`-${threadId}.jsonl`))) return true;
-    } catch {}
-    return false;
-  },
+  codexThreadExists: threadId => { try { return codexThreadExistsIn(join(process.env.HOME ?? "",".codex","sessions"),threadId); } catch { return false; } },
 };

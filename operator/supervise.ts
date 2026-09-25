@@ -27,6 +27,7 @@ export async function superviseDelivery(problems: DeliveryProblem[], d: Supervis
         const peer = await d.peer(p.to_id);
         const address = peer ? d.resolve(peer) : null;
         if (address && (await d.autoWake(p.to_id, address)).wake_policy === "on") continue; // connected; next pass rings it
+        if (p.already_reported) continue; // told once already; keep trying to connect silently
         p = { ...p, detail: "no Claude desktop or Codex address could be proven for this peer" };
       }
       if (seen.has(key)) continue;
