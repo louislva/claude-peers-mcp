@@ -39,6 +39,8 @@ export class PeerStore {
       this.addColumn("peers", "wake_choice", "TEXT");
       // Durable receipt of the operator's own report/bounce, keyed by reason.
       this.addColumn("messages", "problem_reported", "TEXT");
+      // Which wake attempt currently holds this message's claim (refund scoping).
+      this.addColumn("messages", "wake_claim_attempt", "INTEGER");
       this.addColumn("messages", "reply_to", "INTEGER");
       this.addColumn("messages", "woken_at", "INTEGER");
       this.addColumn("messages", "wake_attempts", "INTEGER NOT NULL DEFAULT 0");
@@ -254,11 +256,11 @@ export class PeerStore {
         batches.set(row.peer_id,batch);
       }
       for (const batch of batches.values()) {
-        for (const messageId of batch.message_ids) this.db.run("UPDATE messages SET wake_lease_until=?,wake_attempts=wake_attempts+1 WHERE id=?", [now+o.leaseMs,messageId]);
-        this.db.run("UPDATE peers SET last_wake_at=? WHERE id=?", [now,batch.peer_id]);
-        this.db.run("INSERT INTO wake_log(peer_id,claimed_at,message_ids) VALUES(?,?,?)", [batch.peer_id,now,JSON.stringify(batch.message_ids)]);
         batch.attempt_id = Number(this.db.query("INSERT INTO wake_attempts(peer_id,host_session_id,message_ids,status,claimed_at) VALUES(?,?,?,'claimed',?)")
           .run(batch.peer_id,batch.host_session_id,JSON.stringify(batch.message_ids),now).lastInsertRowid);
+        for (const messageId of batch.message_ids) this.db.run("UPDATE messages SET wake_lease_until=?,wake_attempts=wake_attempts+1,wake_claim_attempt=? WHERE id=?", [now+o.leaseMs,batch.attempt_id,messageId]);
+        this.db.run("UPDATE peers SET last_wake_at=? WHERE id=?", [now,batch.peer_id]);
+        this.db.run("INSERT INTO wake_log(peer_id,claimed_at,message_ids) VALUES(?,?,?)", [batch.peer_id,now,JSON.stringify(batch.message_ids)]);
       }
       return [...batches.values()];
     })();
@@ -273,30 +275,35 @@ export class PeerStore {
     const now = this.now();
     return this.db.transaction(() => {
       const ok: number[] = [];
-      for (const id of ids) {
+      for (const id of [...new Set(ids)]) {
         const row = this.db.query(`SELECT m.id FROM messages m JOIN peers p ON p.id=m.to_id
           WHERE m.id=? AND m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?)
             AND p.wake_policy='on' AND p.dnd_until<=? AND p.host_session_id=?`).get(id,now-WAKE_DEFAULTS.staleOfferMs,now,hostSessionId);
         if (row) ok.push(id);
-        else this.db.run("UPDATE messages SET wake_lease_until=0,wake_attempts=MAX(0,wake_attempts-1) WHERE id=?", [id]);
+        // Refund only an outstanding claim held by THIS attempt, and only once:
+        // clearing the lease and owner makes a repeat or stale recheck a no-op.
+        else if (attemptId) this.db.run(`UPDATE messages SET wake_lease_until=0,wake_attempts=MAX(0,wake_attempts-1),wake_claim_attempt=NULL
+          WHERE id=? AND wake_claim_attempt=? AND wake_lease_until>?`, [id,attemptId,now]);
       }
       if (attemptId && ok.length === 0) this.db.run("UPDATE wake_attempts SET status='revoked',finished_at=? WHERE id=?", [now,attemptId]);
       return ok;
     })();
   }
   /** Report a wake outcome. Failure backs off exponentially (1, 2, 4 min...). */
-  markWoken(ids: number[], ok: boolean, error?: string, attemptId?: number, uncertain = false) {
+  markWoken(ids: number[], ok: boolean, error?: string, attemptId?: number, uncertain = false, permanent = false) {
     if (!Array.isArray(ids) || ids.length > 100 || !ids.every(n=>Number.isSafeInteger(n)&&n>0)) throw new Error("Expected 0-100 positive message IDs");
     const now = this.now();
     return this.db.transaction(() => {
       if (attemptId) this.db.run("UPDATE wake_attempts SET status=?,finished_at=?,error=? WHERE id=?",
         [ok ? (uncertain ? "uncertain":"dispatched"):"failed",now,ok ? null:String(error ?? "wake failed").slice(0,500),attemptId]);
       for (const id of ids) {
-        if (ok) this.db.run("UPDATE messages SET woken_at=?,wake_error=NULL,wake_lease_until=0 WHERE id=?", [now,id]);
+        if (ok) this.db.run("UPDATE messages SET woken_at=?,wake_error=NULL,wake_lease_until=0,wake_claim_attempt=NULL WHERE id=?", [now,id]);
         else {
           const row = this.db.query("SELECT wake_attempts FROM messages WHERE id=?").get(id) as {wake_attempts:number} | null;
           const backoff = 60_000 * 2 ** Math.max(0,(row?.wake_attempts ?? 1)-1);
-          this.db.run("UPDATE messages SET wake_error=?,wake_lease_until=? WHERE id=?", [String(error ?? "wake failed").slice(0,500),now+backoff,id]);
+          // Permanent (e.g. archived thread): don't burn two more attempts first.
+          this.db.run(`UPDATE messages SET wake_error=?,wake_lease_until=?${permanent ? ",wake_attempts=MAX(wake_attempts,?)":""} WHERE id=?`,
+            permanent ? [String(error ?? "wake failed").slice(0,500),now+backoff,WAKE_DEFAULTS.maxAttempts,id] : [String(error ?? "wake failed").slice(0,500),now+backoff,id]);
         }
       }
       return { ok:true,marked:ids.length };

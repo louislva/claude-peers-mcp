@@ -3,6 +3,8 @@ import type { DeliveryProblem, WakeHarness } from "../shared/store.ts";
 export interface SuperviseDeps {
   peer(id: string): Promise<{id:string,pid:number,session_key:string|null} | null>;
   resolve(peer: {pid:number,session_key:string|null}): {harness:WakeHarness,host_session_id:string} | null;
+  /** Why an address can't be proven, when there is hard evidence (e.g. archived Codex thread). */
+  whyUnreachable?(peer: {pid:number,session_key:string|null}): string | null;
   autoWake(id: string, address: {harness:WakeHarness,host_session_id:string}): Promise<{wake_policy:string}>;
   send(to: string, text: string, replyTo: number): Promise<void>;
   emit(line: string): void;
@@ -28,7 +30,8 @@ export async function superviseDelivery(problems: DeliveryProblem[], d: Supervis
         const address = peer ? d.resolve(peer) : null;
         if (address && (await d.autoWake(p.to_id, address)).wake_policy === "on") continue; // connected; next pass rings it
         if (p.already_reported) continue; // told once already; keep trying to connect silently
-        p = { ...p, detail: "no Claude desktop or Codex address could be proven for this peer" };
+        const why = peer && d.whyUnreachable ? d.whyUnreachable(peer) : null;
+        p = { ...p, detail: why ?? "no Claude desktop or Codex address could be proven for this peer" };
       }
       if (seen.has(key)) continue;
       seen.add(key);

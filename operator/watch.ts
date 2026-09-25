@@ -23,7 +23,7 @@ async function post<T>(path:string,body:unknown={}):Promise<T>{
 }
 const deps={
   claim:async()=>(await post<{batches:WakeBatch[]}>("/claim-wakes")).batches,
-  mark:async(ids:number[],ok:boolean,error?:string,attemptId?:number)=>{await post("/mark-woken",{message_ids:ids,ok,error,attempt_id:attemptId});},
+  mark:async(ids:number[],ok:boolean,error?:string,attemptId?:number,permanent?:boolean)=>{await post("/mark-woken",{message_ids:ids,ok,error,attempt_id:attemptId,permanent});},
   spawn:async(argv:string[])=>{
     const p=Bun.spawn(argv,{stdout:"ignore",stderr:"pipe"});
     const timer=setTimeout(()=>p.kill(),60_000);
@@ -39,6 +39,7 @@ const seen=new Set<string>();
 const supervise={
   peer:async(id:string)=>(await post<{id:string,pid:number,session_key:string|null}[]>("/list-peers",{scope:"machine",cwd:"/",git_root:null,include_offline:true})).find(p=>p.id===id) ?? null,
   resolve:(peer:{pid:number,session_key:string|null})=>resolveAddress(peer,liveEvidence),
+  whyUnreachable:(peer:{pid:number,session_key:string|null})=>peer.session_key && liveEvidence.codexThreadArchived?.(peer.session_key) ? "Codex thread is archived; unarchive it or re-address the message":null,
   autoWake:(id:string,address:{harness:string,host_session_id:string})=>post<{wake_policy:string}>("/auto-wake",{id,...address}),
   send:async(to:string,text:string,replyTo:number)=>{await post("/send-message",{from_id:"operator",to_id:to,text,reply_to:replyTo});},
   emit:(line:string)=>console.log(line),

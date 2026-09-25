@@ -7,7 +7,7 @@ export function wakeText(ids: number[]): string {
 
 export interface CycleDeps {
   claim(): Promise<WakeBatch[]>;
-  mark(ids: number[], ok: boolean, error?: string, attemptId?: number): Promise<void>;
+  mark(ids: number[], ok: boolean, error?: string, attemptId?: number, permanent?: boolean): Promise<void>;
   spawn(argv: string[]): Promise<{exitCode: number; stderr: string}>;
   emit(line: string): void;
   /** Broker re-check right before dispatch; returns the ids still eligible. */
@@ -32,7 +32,8 @@ export async function runWakeCycle(d: CycleDeps): Promise<void> {
     if (ids.length === 0) continue;
     if (batch.harness === "codex") {
       const {exitCode,stderr}=await d.spawn([d.codexBin,"queue","--thread",batch.host_session_id,"--message",wakeText(ids)]);
-      await d.mark(ids,exitCode===0,exitCode===0 ? undefined:`codex queue exit ${exitCode}: ${stderr.trim().slice(0,300)}`,batch.attempt_id);
+      const archived = exitCode!==0 && /is archived/i.test(stderr);
+      await d.mark(ids,exitCode===0,exitCode===0 ? undefined:`codex queue exit ${exitCode}: ${stderr.trim().slice(0,300)}`,batch.attempt_id,archived);
     } else {
       d.emit(`WAKE claude-desktop ${batch.host_session_id} ${ids.join(",")}${batch.attempt_id ? ` attempt=${batch.attempt_id}`:""}`);
     }

@@ -223,9 +223,9 @@ describe("revocation is re-checked right before each dispatch (Astra P1)",()=>{
   ["fresh offer",(f:any)=>f.store.poll(f.codex)],
   ["address change",(f:any)=>f.store.optIn(f.codex,{harness:"codex",host_session_id:"01a0cfaf-460b-7ff3-a3b3-b7fc168b74f1"})],
  ] as const) test(`${name} after the claim drops the id and releases the attempt`,()=>{
-  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");f.store.claimWakes();
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");const [b]=f.store.claimWakes();
   revoke(f);
-  expect(f.store.recheckWake(host,[id])).toEqual([]);
+  expect(f.store.recheckWake(host,[id],b!.attempt_id)).toEqual([]);
   expect(f.store.db.query("SELECT wake_attempts,wake_lease_until FROM messages WHERE id=?").get(id)).toEqual({wake_attempts:0,wake_lease_until:0});
  });
 });
@@ -256,5 +256,48 @@ describe("every wake attempt has its own durable record (open item 1)",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");const [b]=f.store.claimWakes();
   f.store.markWoken([id],true,undefined,b!.attempt_id,true);f.advance(5*60_000);
   expect(f.store.claimWakes()).toEqual([]);
+ });
+});
+
+describe("archived threads are permanent (open item 2)",()=>{
+ test("a permanent failure exhausts the message's attempts at once and reports wake-failed",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");const [b]=f.store.claimWakes();
+  f.store.markWoken([id],false,"session is archived",b!.attempt_id,false,true);
+  f.advance(10*60_000);expect(f.store.claimWakes()).toEqual([]);
+  expect(f.store.deliveryProblems().map(p=>[p.reason,p.detail])).toEqual([["wake-failed","session is archived"]]);
+ });
+});
+
+describe("recheck refunds are once-only and claim-scoped (Astra P1, R1.2)",()=>{
+ const host="01a0da28-f06c-7a62-b236-cf37ef228046";
+ const attemptsOf=(f:any,id:number)=>(f.store.db.query("SELECT wake_attempts FROM messages WHERE id=?").get(id) as any).wake_attempts;
+ test("Astra's repro: exhausted failures stay exhausted after opt-out and repeated rechecks",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
+  for(let i=0;i<3;i++){const [b]=f.store.claimWakes();f.store.markWoken([id],false,"x",b!.attempt_id);f.advance(10*60_000);}
+  f.store.optOut(f.codex);
+  expect(f.store.recheckWake(host,[id])).toEqual([]);expect(f.store.recheckWake(host,[id])).toEqual([]);
+  expect(attemptsOf(f,id)).toBe(3);
+ });
+ test("a duplicate recheck (and duplicate ids) refund at most once",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");const [b]=f.store.claimWakes();
+  f.store.optOut(f.codex);
+  f.store.recheckWake(host,[id,id],b!.attempt_id);f.store.recheckWake(host,[id],b!.attempt_id);
+  expect(attemptsOf(f,id)).toBe(0);
+ });
+ test("a completed or expired claim is never refunded",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");const [b]=f.store.claimWakes();
+  f.store.markWoken([id],true,undefined,b!.attempt_id);f.store.optOut(f.codex);
+  f.store.recheckWake(host,[id],b!.attempt_id);expect(attemptsOf(f,id)).toBe(1);
+  const g=fixture();optInBoth(g);const m=g.store.send(g.sender,g.codex,"y").id;const [c]=g.store.claimWakes();
+  g.advance(61_000);g.store.optOut(g.codex);g.store.recheckWake(host,[m],c!.attempt_id);expect(attemptsOf(g,m)).toBe(1);
+ });
+ test("a stale claimant cannot cancel a newer claim",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
+  const [old]=f.store.claimWakes();f.advance(61_000);          // old claim expires unreported
+  const [fresh]=f.store.claimWakes();expect(fresh!.attempt_id).not.toBe(old!.attempt_id);
+  f.store.setDnd(f.codex,60_000);
+  f.store.recheckWake(host,[id],old!.attempt_id);
+  expect(attemptsOf(f,id)).toBe(2);
+  expect((f.store.db.query("SELECT wake_lease_until FROM messages WHERE id=?").get(id) as any).wake_lease_until).toBeGreaterThan(0);
  });
 });

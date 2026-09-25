@@ -60,3 +60,9 @@ test("an already-reported unaddressed recipient keeps being connected when evide
  const ok=deps();await superviseDelivery([P("no-wake-address",{already_reported:true})],ok.d,ok.seen);
  expect(ok.log.autoWake).toHaveLength(1);
 });
+
+test("an unaddressed recipient whose Codex thread is archived is reported as archived",async()=>{
+ const {d,log,seen}=deps({resolve:()=>null,whyUnreachable:()=>"Codex thread is archived; unarchive it or re-address the message"});
+ await superviseDelivery([P("no-wake-address")],d,seen);
+ expect(log.emitted[0]).toContain("Codex thread is archived");
+});

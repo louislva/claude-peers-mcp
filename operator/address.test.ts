@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { resolveAddress, codexThreadExistsIn } from "./address.ts";
+import { resolveAddress, codexThreadExistsIn, codexThreadArchivedIn } from "./address.ts";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,4 +29,14 @@ test("Codex thread lookup survives stray files like .DS_Store at any level",()=>
  expect(codexThreadExistsIn(root,"01a0cfaf-460b-7ff3-a3b3-b7fc168b74f1")).toBe(true);
  expect(codexThreadExistsIn(root,"01a0cfaf-460b-7ff3-a3b3-b7fc168b74f2")).toBe(false);
  expect(codexThreadExistsIn(root,"*")).toBe(false);
+});
+
+test("archived Codex threads are recognised in flat and dated archive layouts",()=>{
+ const root=mkdtempSync(join(tmpdir(),"codex-archived-"));
+ writeFileSync(join(root,"rollout-2026-09-25T15-00-00-01a0d945-603a-7ba2-966c-839900d44ca6.jsonl"),"{}");
+ mkdirSync(join(root,"2026","09","25"),{recursive:true});
+ writeFileSync(join(root,"2026","09","25","rollout-x-01a0da28-f06c-7a62-b236-cf37ef228046.jsonl"),"{}");
+ expect(codexThreadArchivedIn(root,"01a0d945-603a-7ba2-966c-839900d44ca6")).toBe(true);
+ expect(codexThreadArchivedIn(root,"01a0da28-f06c-7a62-b236-cf37ef228046")).toBe(true);
+ expect(codexThreadArchivedIn(root,"01a0cfaf-460b-7ff3-a3b3-b7fc168b74f1")).toBe(false);
 });

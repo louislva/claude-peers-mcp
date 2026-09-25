@@ -8,7 +8,7 @@ function deps(batches:WakeBatch[],exit=0){
  const calls={spawned:[] as string[][],marked:[] as unknown[][],emitted:[] as string[]};
  return {calls,d:{
   claim:async()=>batches,
-  mark:async(ids:number[],ok:boolean,error?:string)=>{calls.marked.push([ids,ok,error]);},
+  mark:async(ids:number[],ok:boolean,error?:string,_a?:number,permanent?:boolean)=>{calls.marked.push(permanent?[ids,ok,error,"permanent"]:[ids,ok,error]);},
   spawn:async(argv:string[])=>{calls.spawned.push(argv);return {exitCode:exit,stderr:exit?"boom":""};},
   emit:(line:string)=>{calls.emitted.push(line);},
   recheck:async(_h:string,ids:number[])=>ids,
@@ -47,4 +47,10 @@ test("a batch revoked between claim and dispatch is not rung; a partly revoked o
  expect(calls.emitted).toEqual([`WAKE claude-desktop ${claude.host_session_id} 7`]);
  const two=deps([codex]);two.d.recheck=async()=>[6];await runWakeCycle(two.d);
  expect(two.calls.spawned[0]!.at(-1)).toBe(wakeText([6]));expect(two.calls.marked).toEqual([[[6],true,undefined]]);
+});
+
+test("codex refusing an archived thread is marked permanent",async()=>{
+ const {calls,d}=deps([codex],1);d.spawn=async()=>({exitCode:1,stderr:"thread/queue/add failed: session 01a0 is archived. Run `codex unarchive`"});
+ await runWakeCycle(d);
+ expect(calls.marked[0]![3]).toBe("permanent");
 });

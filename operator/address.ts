@@ -8,6 +8,8 @@ export interface AddressEvidence {
   processEnv(pid: number): string;
   /** True if a Codex rollout file exists for this thread id. */
   codexThreadExists(threadId: string): boolean;
+  /** True if the thread was archived in Codex (it can't be rung until unarchived). */
+  codexThreadArchived?(threadId: string): boolean;
 }
 
 /**
@@ -31,7 +33,16 @@ export function codexThreadExistsIn(root: string, threadId: string): boolean {
   return false;
 }
 
+/** True if the thread's rollout file sits in Codex's archived_sessions (flat or dated layout). */
+export function codexThreadArchivedIn(root: string, threadId: string): boolean {
+  if (!UUID.test(threadId)) return false;
+  for (const pattern of [`rollout-*-${threadId}.jsonl`,`**/rollout-*-${threadId}.jsonl`])
+    for (const _ of new Bun.Glob(pattern).scanSync({cwd:root,onlyFiles:true})) return true;
+  return false;
+}
+
 export const liveEvidence: AddressEvidence = {
   processEnv: pid => new TextDecoder().decode(Bun.spawnSync(["ps","eww","-o","command=","-p",String(pid)]).stdout),
   codexThreadExists: threadId => { try { return codexThreadExistsIn(join(process.env.HOME ?? "",".codex","sessions"),threadId); } catch { return false; } },
+  codexThreadArchived: threadId => { try { return codexThreadArchivedIn(join(process.env.HOME ?? "",".codex","archived_sessions"),threadId); } catch { return false; } },
 };
