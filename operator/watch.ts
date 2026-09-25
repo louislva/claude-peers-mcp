@@ -52,8 +52,16 @@ async function pass(){
   const {problems}=await post<{problems:DeliveryProblem[]}>("/delivery-problems");
   await superviseDelivery(problems,supervise as any,seen);
 }
+// Self-reload (open item 7): if any watcher/broker-client source changes,
+// print RELOAD and exit; the operator re-arms Monitor, loading the new code.
+import { statSync, readdirSync } from "node:fs";
+const ROOT=new URL("..",import.meta.url).pathname;
+const sources=()=>["operator","shared"].flatMap(d=>readdirSync(ROOT+d).filter(f=>f.endsWith(".ts")&&!f.endsWith(".test.ts")).map(f=>`${ROOT}${d}/${f}`));
+const stamp=()=>sources().map(f=>`${f}:${statSync(f).mtimeMs}`).join("|");
+const startedWith=stamp();
 if(process.argv.includes("--once")) await pass();
 else for(;;){
   try{await pass();}catch(e){console.error(String(e));}
+  if(stamp()!==startedWith){console.log("RELOAD watcher code changed; re-arm Monitor now");process.exit(0);}
   await Bun.sleep(2000);
 }
