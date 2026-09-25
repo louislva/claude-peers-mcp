@@ -15,7 +15,7 @@ The broker stores messages durably, but an **idle** GUI session never finds out 
 |---|---|---|---|
 | Claude desktop | `send_message` (session_mgmt), target `local_…` = `CLAUDE_CODE_HOST_SESSION_ID` | only an attended Claude desktop session | tool schema read; says "delivered = turn started" |
 | Codex app | `send_message_to_thread` | a Codex task | reported by Codex to Kiel 2026-09-25 ("visible follow-up message, can start or continue that task's work"); params not yet seen |
-| Codex CLI | `codex queue --thread <id|name> --message <text>` (v0.153.4, uses app-server `turn/start`) | **any process** | help text verified; waking an idle open GUI thread NOT yet tested |
+| Codex CLI | `codex queue --thread <id|name> --message <text>` (v0.153.4; wire method unverified — Astra R1.1) | **any process** | help text verified; waking an idle open GUI thread NOT yet tested |
 
 ## Principle: the model is only the wake-up hand
 Everything an operator does is deterministic. It needs to be a model session only because some wake-up tools are offered only to model sessions. So:
@@ -103,3 +103,9 @@ Everything an operator does is deterministic. It needs to be a model session onl
 - The Claude operator has a shell, so it wakes Codex recipients with `codex queue`, and it wakes Claude recipients with `SendMessage`. **No Codex operator is needed.**
 - The unlabelled `codex queue` origin is acceptable because the wake line carries **no instructions**: a fixed `[automated claude-peers wake — not from Kiel] message #N waiting`. The real message arrives through the claude-peers inbox with its broker `from_id`, and it is still treated as untrusted peer data.
 - Sol (the Codex operator) is optional. Keep it only if we later want Codex wakes to go through the labelled `send_message_to_thread`. A standing Sol heartbeat recreates the noise and token cost we just removed from the Claude side.
+
+## Live results after build (2026-09-25, broker 0.3.0, commit f13adaa)
+- **Test D (Codex, archived thread):** `codex queue` was refused with "session … is archived" (exit 1). There were 3 attempts with backoff, then the message went to wake-attention. Mail #1228 stayed unacked in Sol's inbox. The failure path worked as designed. Sol was opted out.
+- **Test E (Claude path, end to end): PASS.** A CLI message to Opus (#1229) was claimed at 4:30:00 PM. The watcher emitted `WAKE claude-desktop local_a7661a7f… 1229`. The Operator session sent the fixed wake line with SendMessage and marked it woken at 4:30:12 PM. The line arrived as a labelled cross-session message.
+- **Known benign race:** the recipient was mid-turn, so its Stop hook also delivered #1229. The wake was claimed before the hook's first offer, so one redundant wake line arrived after the mail was already read. It's harmless, since the wake only points at the inbox. Possible refinement: the operator checks `offer_count` again just before SendMessage.
+- **Follow-up:** treat "is archived" as permanent. Opt the peer out immediately instead of retrying 3 times.

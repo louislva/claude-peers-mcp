@@ -11,7 +11,7 @@ export interface SuperviseDeps {
 }
 
 export function bounceText(id: number, to: string, reason: string, detail?: string) {
-  return `[claude-peers operator] Your message #${id} to ${to} has not been delivered: ${reason}${detail ? ` (${detail})`:""}. It stays queued in their inbox; check the recipient id or ask Kiel.`;
+  return `[claude-peers operator] Could not ring ${to} for your message #${id}: ${reason}${detail ? ` (${detail})`:""}. The message is NOT lost: it remains queued in their inbox and arrives when they next take a turn. Check the recipient id or ask Kiel if it's urgent.`;
 }
 
 /**
