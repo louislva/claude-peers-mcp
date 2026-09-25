@@ -31,7 +31,10 @@ const deps={
     return {exitCode,stderr:await new Response(p.stderr).text()};
   },
   emit:(line:string)=>console.log(line),
-  recheck:async(host:string,ids:number[],attemptId?:number)=>(await post<{message_ids:number[]}>("/recheck-wake",{host_session_id:host,message_ids:ids,attempt_id:attemptId})).message_ids,
+  // The recheck runs immediately before every dispatch, so the ownership guard
+  // here stops a displaced or orphaned loop before any ring (claims it leaves
+  // behind expire and are fenced).
+  recheck:async(host:string,ids:number[],attemptId?:number)=>{guard();return (await post<{message_ids:number[]}>("/recheck-wake",{host_session_id:host,message_ids:ids,attempt_id:attemptId})).message_ids;},
   codexBin:process.env.CODEX_BIN ?? "/opt/homebrew/bin/codex",
   selfHostId:process.env.CLAUDE_CODE_HOST_SESSION_ID,
 };
@@ -41,11 +44,12 @@ const supervise={
   resolve:(peer:{pid:number,session_key:string|null})=>resolveAddress(peer,liveEvidence),
   whyUnreachable:(peer:{pid:number,session_key:string|null})=>peer.session_key && liveEvidence.codexThreadArchived?.(peer.session_key) ? "Codex thread is archived; unarchive it or re-address the message":null,
   autoWake:(id:string,address:{harness:string,host_session_id:string})=>post<{wake_policy:string}>("/auto-wake",{id,...address}),
-  send:async(to:string,text:string,replyTo:number)=>{await post("/send-message",{from_id:"operator",to_id:to,text,reply_to:replyTo});},
+  send:async(to:string,text:string,replyTo:number)=>{guard();await post("/send-message",{from_id:"operator",to_id:to,text,reply_to:replyTo});},
   emit:(line:string)=>console.log(line),
   markReported:async(id:number,reason:string)=>{await post("/mark-problem-reported",{message_id:id,reason});},
 };
 async function pass(){
+  guard();
   await runWakeCycle(deps);
   // The ledger: every recent message that has not arrived. Connect what can be
   // proven, bounce to the caller, and hand the rest to the operator model.
@@ -59,22 +63,32 @@ async function pass(){
 }
 // Self-reload (open item 7): if any watcher/broker-client source changes, exit
 // RELOAD_EXIT and the watch.ts supervisor restarts us on the new code. The
-// operator model is not in this path. Each pass leaves a stamp for the
-// operator's heartbeat (health.ts) to prove the loop is alive.
+// operator model is not in this path.
 import { statSync, readdirSync, writeFileSync } from "node:fs";
 import { PASS_STAMP } from "./health.ts";
-const RELOAD_EXIT=75; // mirrors watch.ts
+import { DISPLACED_EXIT, RELOAD_EXIT, isAlive, mayRing, readLockPid } from "./lifecycle.ts";
 const SUPERVISOR_PID=Number(process.env.CLAUDE_PEERS_SUPERVISOR_PID ?? 0);
+// Orphaned (supervisor gone) or displaced (a newer supervisor owns the lock):
+// exit before touching the board. An orphan would also hold Monitor's stdout
+// open and hide the outage. Bun caches process.ppid, hence the pid probe.
+function guard(){ if(!mayRing({supervisorPid:SUPERVISOR_PID,lockPid:readLockPid(),isAlive})) process.exit(DISPLACED_EXIT); }
+// Liveness for the operator's heartbeat (health.ts), stamped every 5s even
+// mid-pass: a slow Codex dispatch is busy, not down.
+let passStartedAt:number|null=null;
+const writeStamp=()=>{try{writeFileSync(PASS_STAMP,JSON.stringify({pid:process.pid,at:Date.now(),pass_started_at:passStartedAt}));}catch{}};
 const ROOT=new URL("..",import.meta.url).pathname;
 const sources=()=>["operator","shared"].flatMap(d=>readdirSync(ROOT+d).filter(f=>f.endsWith(".ts")&&!f.endsWith(".test.ts")).map(f=>`${ROOT}${d}/${f}`));
 const stamp=()=>sources().map(f=>`${f}:${statSync(f).mtimeMs}`).join("|");
 const startedWith=stamp();
 if(process.argv.includes("--once")) await pass();
-else for(;;){
-  try{await pass();writeFileSync(PASS_STAMP,JSON.stringify({pid:process.pid,at:Date.now()}));}catch(e){console.error(String(e));}
-  if(stamp()!==startedWith) process.exit(RELOAD_EXIT);
-  // Supervisor died: never ring as an orphan (an orphan also holds Monitor's
-  // stdout open, hiding the outage). Bun caches process.ppid, so probe the pid.
-  if(SUPERVISOR_PID){try{process.kill(SUPERVISOR_PID,0);}catch{process.exit(0);}}
-  await Bun.sleep(2000);
+else {
+  setInterval(()=>{guard();writeStamp();},5000);
+  for(;;){
+    guard(); // before stamping: a displaced loop must not overwrite the owner's liveness
+    passStartedAt=Date.now();writeStamp();
+    try{await pass();}catch(e){console.error(String(e));}
+    passStartedAt=null;writeStamp();
+    if(stamp()!==startedWith) process.exit(RELOAD_EXIT);
+    await Bun.sleep(2000);
+  }
 }

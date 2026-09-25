@@ -14,22 +14,31 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 
-/** Written by the watcher loop after every pass. */
+/** Written by the watcher loop every few seconds, even mid-pass:
+ *  { pid, at, pass_started_at } (pass_started_at is null between passes). */
 export const PASS_STAMP = `${homedir()}/.claude-peers-watcher.json`;
-/** The loop passes every ~2s; a minute of silence means it is not running. */
+/** The loop stamps every ~5s; a minute of silence means it is not running. */
 export const STALE_AFTER_MS = 60_000;
+/** A live loop inside one pass this long is stuck (dispatch timeouts are 60s each). */
+export const STUCK_AFTER_MS = 15 * 60_000;
+
+const mins = (ms: number) => Math.round(ms / 60_000);
 
 export function assessHealth(s: {
   now: number;
   broker: { status: string; wake?: boolean } | null;
-  lastPassAt: number | null;
+  aliveAt: number | null;
+  passStartedAt: number | null;
 }): string[] {
   const out: string[] = [];
   if (!s.broker) out.push("BROKER-DOWN broker not answering on /health; push Kiel");
   else if (!s.broker.wake) out.push("BROKER-DOWN broker is running without wake support; push Kiel");
-  if (s.lastPassAt === null) out.push("WATCHER-DOWN no watcher pass on record; re-arm Monitor now");
-  else if (s.now - s.lastPassAt > STALE_AFTER_MS)
-    out.push(`WATCHER-DOWN last pass ${Math.round((s.now - s.lastPassAt) / 60_000)} min ago; re-arm Monitor now`);
+  if (s.aliveAt === null) out.push("WATCHER-DOWN no watcher pass on record; re-arm Monitor now");
+  else if (s.now - s.aliveAt > STALE_AFTER_MS)
+    out.push(`WATCHER-DOWN last pass ${mins(s.now - s.aliveAt)} min ago; re-arm Monitor now`);
+  // Stuck is reported, never re-armed: re-arming would kill a pass that may be mid-dispatch.
+  else if (s.passStartedAt !== null && s.now - s.passStartedAt > STUCK_AFTER_MS)
+    out.push(`WATCHER-STUCK one pass has run ${mins(s.now - s.passStartedAt)} min; push Kiel`);
   return out;
 }
 
@@ -37,7 +46,7 @@ if (import.meta.main) {
   const port = process.env.CLAUDE_PEERS_PORT ?? "7899";
   const broker = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(3000) })
     .then(r => (r.ok ? r.json() : null)).catch(() => null);
-  let lastPassAt: number | null = null;
-  try { lastPassAt = JSON.parse(readFileSync(PASS_STAMP, "utf8")).at ?? null; } catch {}
-  for (const line of assessHealth({ now: Date.now(), broker, lastPassAt })) console.log(line);
+  let aliveAt: number | null = null, passStartedAt: number | null = null;
+  try { const s = JSON.parse(readFileSync(PASS_STAMP, "utf8")); aliveAt = s.at ?? null; passStartedAt = s.pass_started_at ?? null; } catch {}
+  for (const line of assessHealth({ now: Date.now(), broker, aliveAt, passStartedAt })) console.log(line);
 }
