@@ -29,8 +29,8 @@ describe("wake-ups are opt-in and separate from delivery",()=>{
   const a=f.store.send(f.sender,f.codex,"one").id,b=f.store.send(f.sender,f.codex,"two").id,c=f.store.send(f.sender,f.claude,"three").id;
   const batches=f.store.claimWakes();
   expect(batches).toEqual([
-   {peer_id:f.codex,harness:"codex",host_session_id:"01a0da28-f06c-7a62-b236-cf37ef228046",message_ids:[a,b]},
-   {peer_id:f.claude,harness:"claude-desktop",host_session_id:"local_a7661a7f-932d-4a9a-aee7-eacd33e50365",message_ids:[c]},
+   {peer_id:f.codex,harness:"codex",host_session_id:"01a0da28-f06c-7a62-b236-cf37ef228046",message_ids:[a,b],attempt_id:expect.any(Number)},
+   {peer_id:f.claude,harness:"claude-desktop",host_session_id:"local_a7661a7f-932d-4a9a-aee7-eacd33e50365",message_ids:[c],attempt_id:expect.any(Number)},
   ]);
   expect(f.store.claimWakes()).toEqual([]);
  });
@@ -227,5 +227,34 @@ describe("revocation is re-checked right before each dispatch (Astra P1)",()=>{
   revoke(f);
   expect(f.store.recheckWake(host,[id])).toEqual([]);
   expect(f.store.db.query("SELECT wake_attempts,wake_lease_until FROM messages WHERE id=?").get(id)).toEqual({wake_attempts:0,wake_lease_until:0});
+ });
+});
+
+describe("every wake attempt has its own durable record (open item 1)",()=>{
+ const attempts=(f:any)=>f.store.db.query("SELECT id,peer_id,host_session_id,message_ids,status,error FROM wake_attempts ORDER BY id").all();
+ test("a claim creates a 'claimed' attempt and the batch carries its id",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
+  const [b]=f.store.claimWakes();
+  expect(b!.attempt_id).toBeGreaterThan(0);
+  expect(attempts(f)).toEqual([{id:b!.attempt_id,peer_id:f.codex,host_session_id:"01a0da28-f06c-7a62-b236-cf37ef228046",message_ids:JSON.stringify([id]),status:"claimed",error:null}]);
+ });
+ test("outcomes are recorded per attempt: dispatched, uncertain, failed; revoked by recheck",()=>{
+  const f=fixture();optInBoth(f);
+  const out:Record<string,string>={};
+  for (const outcome of ["dispatched","uncertain","failed"] as const){
+   const {id}=f.store.send(f.sender,f.codex,outcome);const [b]=f.store.claimWakes();
+   f.store.markWoken(b!.message_ids,outcome!=="failed",outcome==="failed"?"exit 1":undefined,b!.attempt_id,outcome==="uncertain");
+   out[outcome]=(f.store.db.query("SELECT status FROM wake_attempts WHERE id=?").get(b!.attempt_id) as any).status;
+   f.advance(31_000);expect(id).toBeGreaterThan(0);
+  }
+  const {id}=f.store.send(f.sender,f.codex,"r");const [b]=f.store.claimWakes();f.store.optOut(f.codex);
+  f.store.recheckWake("01a0da28-f06c-7a62-b236-cf37ef228046",[id],b!.attempt_id);
+  out.revoked=(f.store.db.query("SELECT status FROM wake_attempts WHERE id=?").get(b!.attempt_id) as any).status;
+  expect(out).toEqual({dispatched:"dispatched",uncertain:"uncertain",failed:"failed",revoked:"revoked"});
+ });
+ test("an uncertain dispatch still counts as sent for the message (no re-ring until the receipt timeout)",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");const [b]=f.store.claimWakes();
+  f.store.markWoken([id],true,undefined,b!.attempt_id,true);f.advance(5*60_000);
+  expect(f.store.claimWakes()).toEqual([]);
  });
 });

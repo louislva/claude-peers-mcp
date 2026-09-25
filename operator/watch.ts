@@ -23,7 +23,7 @@ async function post<T>(path:string,body:unknown={}):Promise<T>{
 }
 const deps={
   claim:async()=>(await post<{batches:WakeBatch[]}>("/claim-wakes")).batches,
-  mark:async(ids:number[],ok:boolean,error?:string)=>{await post("/mark-woken",{message_ids:ids,ok,error});},
+  mark:async(ids:number[],ok:boolean,error?:string,attemptId?:number)=>{await post("/mark-woken",{message_ids:ids,ok,error,attempt_id:attemptId});},
   spawn:async(argv:string[])=>{
     const p=Bun.spawn(argv,{stdout:"ignore",stderr:"pipe"});
     const timer=setTimeout(()=>p.kill(),60_000);
@@ -31,7 +31,7 @@ const deps={
     return {exitCode,stderr:await new Response(p.stderr).text()};
   },
   emit:(line:string)=>console.log(line),
-  recheck:async(host:string,ids:number[])=>(await post<{message_ids:number[]}>("/recheck-wake",{host_session_id:host,message_ids:ids})).message_ids,
+  recheck:async(host:string,ids:number[],attemptId?:number)=>(await post<{message_ids:number[]}>("/recheck-wake",{host_session_id:host,message_ids:ids,attempt_id:attemptId})).message_ids,
   codexBin:process.env.CODEX_BIN ?? "/opt/homebrew/bin/codex",
   selfHostId:process.env.CLAUDE_CODE_HOST_SESSION_ID,
 };

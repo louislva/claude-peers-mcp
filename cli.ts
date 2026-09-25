@@ -77,11 +77,13 @@ switch (cmd) {
     // opt-in <peer> <harness> <host-id> | opt-out <peer> | dnd <peer> <minutes>
     // mark-woken <ids,comma> ok|fail [error...] | wake-attention
     const a=process.argv.slice(3);
+    // Operator lines carry "attempt=<n>"; pass it through to the attempt record.
+    const attemptArg=(()=>{const t=a.find(x=>x.startsWith("attempt="));return t?Number(t.slice(8)):undefined;})();
     const [path,body]=cmd==="opt-in" ? ["/opt-in",{id:a[0],harness:a[1],host_session_id:a[2]}]
       :cmd==="opt-out" ? ["/opt-out",{id:a[0]}]
       :cmd==="dnd" ? ["/set-dnd",{id:a[0],duration_ms:Number(a[1])*60_000}]
-      :cmd==="recheck" ? ["/recheck-wake",{host_session_id:a[0],message_ids:(a[1]??"").split(",").filter(Boolean).map(Number)}]
-      :cmd==="mark-woken" ? ["/mark-woken",{message_ids:(a[0]??"").split(",").filter(Boolean).map(Number),ok:a[1]==="ok",error:a.slice(2).join(" ")||undefined}]
+      :cmd==="recheck" ? ["/recheck-wake",{host_session_id:a[0],message_ids:(a[1]??"").split(",").filter(Boolean).map(Number),attempt_id:attemptArg}]
+      :cmd==="mark-woken" ? ["/mark-woken",{message_ids:(a[0]??"").split(",").filter(Boolean).map(Number),ok:a[1]==="ok"||a[1]==="uncertain",uncertain:a[1]==="uncertain",error:a.slice(2).filter(x=>!x.startsWith("attempt=")).join(" ")||undefined,attempt_id:attemptArg}]
       :["/wake-attention",{}];
     try { console.log(JSON.stringify(await brokerFetch(path as string,body),null,2)); }
     catch(e) { console.error(String(e)); process.exitCode=1; }
