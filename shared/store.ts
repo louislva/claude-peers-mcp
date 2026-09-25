@@ -247,12 +247,12 @@ export class PeerStore {
     return this.db.transaction(() => {
       const rows = this.db.query(`SELECT m.id, p.id AS peer_id, p.harness, p.host_session_id FROM messages m
         JOIN peers p ON p.id = m.to_id
-        WHERE m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?) AND m.wake_attempts<? AND m.wake_claim_until<=? AND m.wake_retry_after<=?
+        WHERE m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?) AND m.wake_attempts<? AND m.wake_claim_until<=? AND m.wake_retry_after<=? AND m.sent_at>=?
           AND (m.woken_at IS NULL OR m.woken_at<=?)
           AND p.wake_policy='on' AND p.host_session_id IS NOT NULL AND p.dnd_until<=?
           AND p.last_wake_at<=?
           AND (SELECT COUNT(*) FROM wake_log w WHERE w.peer_id=p.id AND w.claimed_at>?)<?
-        ORDER BY m.id`).all(now-o.staleOfferMs,o.maxAttempts,now,now,now-o.receiptTimeoutMs,now,now-o.minGapMs,now-3600_000,o.maxPerHour) as {id:number,peer_id:string,harness:WakeHarness,host_session_id:string}[];
+        ORDER BY m.id`).all(now-o.staleOfferMs,o.maxAttempts,now,now,new Date(now-o.windowMs).toISOString(),now-o.receiptTimeoutMs,now,now-o.minGapMs,now-3600_000,o.maxPerHour) as {id:number,peer_id:string,harness:WakeHarness,host_session_id:string}[];
       const batches = new Map<string,WakeBatch>();
       for (const row of rows) {
         const batch = batches.get(row.peer_id) ?? {peer_id:row.peer_id,harness:row.harness,host_session_id:row.host_session_id,message_ids:[]};
@@ -370,4 +370,4 @@ const HOST_SESSION_PATTERNS: Record<string,RegExp> = {
 };
 // staleOfferMs: an offer not acknowledged this long after its lease expired is not treated
 // as arrival (the hook output may never have reached the model; Astra P1).
-export const WAKE_DEFAULTS = { staleOfferMs:15*60_000, leaseMs:60_000, minGapMs:30_000, receiptTimeoutMs:10*60_000, maxAttempts:3, maxPerHour:20, maxBatch:20 };
+export const WAKE_DEFAULTS = { windowMs:24*3600_000, staleOfferMs:15*60_000, leaseMs:60_000, minGapMs:30_000, receiptTimeoutMs:10*60_000, maxAttempts:3, maxPerHour:20, maxBatch:20 };

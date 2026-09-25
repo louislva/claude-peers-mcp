@@ -12,7 +12,7 @@ function fixture(){
  const store=new PeerStore(join(dir,"t.db"),pid=>pid>0,()=>time);stores.push(store);
  const reg=(pid:number)=>store.register({pid,cwd:"/p",git_root:null,tty:null,summary:"",pid_start:`b${pid}`}).id;
  const sender=reg(1),codex=reg(2),claude=reg(3);
- return {store,sender,codex,claude,reg,advance:(ms:number)=>{time+=ms;}};
+ return {store,sender,codex,claude,reg,now:()=>time,advance:(ms:number)=>{time+=ms;}};
 }
 /** Claim and report every batch through its own attempt id (the fenced path). */
 const ring=(f:ReturnType<typeof fixture>,ok=true,err?:string)=>{const bs=f.store.claimWakes();for(const b of bs)f.store.markWoken(b.message_ids,ok,err,b.attempt_id!);return bs;};
@@ -330,5 +330,30 @@ describe("claim fencing on dispatch and completion (Astra P1, R1.3)",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");f.store.claimWakes();
   expect(()=>(f.store as any).markWoken([id],true)).toThrow("attempt id");
   expect(()=>(f.store as any).recheckWake(host,[id])).toThrow("attempt id");
+ });
+});
+
+describe("two watchers on one broker database (open item 4)",()=>{
+ test("a batch claimed through one connection can't be claimed through another; either can complete it with the attempt id",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
+  const other=new PeerStore(f.store.db.filename,pid=>pid>0,()=>f.now());stores.push(other);
+  const [a]=f.store.claimWakes();expect(other.claimWakes()).toEqual([]);
+  expect(other.markWoken([id],true,undefined,a!.attempt_id!).marked).toBe(1);
+  expect(f.store.markWoken([id],true,undefined,a!.attempt_id!).marked).toBe(0);   // duplicate completion: no-op
+ });
+ test("interleaved claims across connections never overlap",()=>{
+  const f=fixture();optInBoth(f);
+  const other=new PeerStore(f.store.db.filename,pid=>pid>0,()=>f.now());stores.push(other);
+  for(let i=0;i<10;i++)f.store.send(f.sender,i%2?f.codex:f.claude,`m${i}`);
+  const seen=[...f.store.claimWakes(),...other.claimWakes()].flatMap(b=>b.message_ids);
+  expect(new Set(seen).size).toBe(seen.length);expect(seen).toHaveLength(10);
+ });
+});
+
+describe("age window (open item 0)",()=>{
+ test("mail older than 24 hours is not rung (hooks still deliver it)",()=>{
+  const f=fixture();optInBoth(f);f.store.send(f.sender,f.codex,"ancient");f.advance(25*3600_000);
+  expect(f.store.claimWakes()).toEqual([]);
+  const {id}=f.store.send(f.sender,f.codex,"fresh");expect(f.store.claimWakes().map(b=>b.message_ids)).toEqual([[id]]);
  });
 });

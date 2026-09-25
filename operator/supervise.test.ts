@@ -39,7 +39,7 @@ test("an opted-out recipient is respected: no connect attempt, sender told",asyn
 test("never bounce to the CLI or to the operator itself (no bounce loops)",async()=>{
  const {d,log,seen}=deps();
  await superviseDelivery([P("wake-failed",{from_id:"cli"}),P("wake-failed",{message_id:8,from_id:"operator"})],d,seen);
- expect(log.sent).toEqual([]);expect(log.emitted).toHaveLength(2);
+ expect(log.sent).toEqual([]);expect(log.emitted).toEqual(["UNDELIVERED messages #7, #8 to rcpt1: wake-failed"]);
 });
 test("woken but not picked up goes to the operator model to ring again by hand",async()=>{
  const {d,log,seen}=deps();await superviseDelivery([P("woken-not-picked-up")],d,seen);
@@ -65,4 +65,14 @@ test("an unaddressed recipient whose Codex thread is archived is reported as arc
  const {d,log,seen}=deps({resolve:()=>null,whyUnreachable:()=>"Codex thread is archived; unarchive it or re-address the message"});
  await superviseDelivery([P("no-wake-address")],d,seen);
  expect(log.emitted[0]).toContain("Codex thread is archived");
+});
+
+test("notices are grouped: one line per recipient+reason, one bounce per sender (Astra #1244)",async()=>{
+ const {d,log,seen}=deps({resolve:()=>null});
+ await superviseDelivery([P("no-wake-address",{message_id:1}),P("no-wake-address",{message_id:2}),P("no-wake-address",{message_id:3,from_id:"sender2"}),P("wake-failed",{message_id:4,detail:"x"})],d,seen);
+ expect(log.emitted).toEqual([
+  "UNDELIVERED messages #1, #2, #3 to rcpt1: no-wake-address (no Claude desktop or Codex address could be proven for this peer)",
+  "UNDELIVERED message #4 to rcpt1: wake-failed (x)"]);
+ expect(log.sent.map((s:any)=>[s[0],s[2]])).toEqual([["sender1",1],["sender2",3],["sender1",4]]);
+ expect(log.sent[0][1]).toContain("messages #1, #2");
 });
