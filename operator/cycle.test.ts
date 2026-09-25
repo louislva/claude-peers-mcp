@@ -11,6 +11,7 @@ function deps(batches:WakeBatch[],exit=0){
   mark:async(ids:number[],ok:boolean,error?:string)=>{calls.marked.push([ids,ok,error]);},
   spawn:async(argv:string[])=>{calls.spawned.push(argv);return {exitCode:exit,stderr:exit?"boom":""};},
   emit:(line:string)=>{calls.emitted.push(line);},
+  recheck:async(_h:string,ids:number[])=>ids,
   codexBin:"/opt/homebrew/bin/codex",selfHostId:"local_085fc697-b6f8-4b21-bf1d-1e03b5f38a5c",
  }};
 }
@@ -36,4 +37,14 @@ test("the operator never wakes its own session",async()=>{
  const self={...claude,host_session_id:"local_085fc697-b6f8-4b21-bf1d-1e03b5f38a5c"};
  const {calls,d}=deps([self]);await runWakeCycle(d);
  expect(calls.emitted).toEqual([]);expect(calls.marked).toEqual([[[7],false,"refused: recipient is the operator's own session"]]);
+});
+
+test("a batch revoked between claim and dispatch is not rung; a partly revoked one rings only the survivors",async()=>{
+ const {calls,d}=deps([codex,claude]);
+ d.recheck=async(h:string,ids:number[])=>h===codex.host_session_id ? [] : ids;
+ await runWakeCycle(d);
+ expect(calls.spawned).toEqual([]);expect(calls.marked).toEqual([]);
+ expect(calls.emitted).toEqual([`WAKE claude-desktop ${claude.host_session_id} 7`]);
+ const two=deps([codex]);two.d.recheck=async()=>[6];await runWakeCycle(two.d);
+ expect(two.calls.spawned[0]!.at(-1)).toBe(wakeText([6]));expect(two.calls.marked).toEqual([[[6],true,undefined]]);
 });

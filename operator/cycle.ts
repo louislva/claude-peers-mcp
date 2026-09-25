@@ -10,6 +10,8 @@ export interface CycleDeps {
   mark(ids: number[], ok: boolean, error?: string): Promise<void>;
   spawn(argv: string[]): Promise<{exitCode: number; stderr: string}>;
   emit(line: string): void;
+  /** Broker re-check right before dispatch; returns the ids still eligible. */
+  recheck(hostSessionId: string, ids: number[]): Promise<number[]>;
   codexBin: string;
   selfHostId?: string;
 }
@@ -25,11 +27,14 @@ export async function runWakeCycle(d: CycleDeps): Promise<void> {
       await d.mark(batch.message_ids,false,"refused: recipient is the operator's own session");
       continue;
     }
+    // Earlier dispatches in this pass can take up to 60s each: re-check now.
+    const ids = await d.recheck(batch.host_session_id,batch.message_ids);
+    if (ids.length === 0) continue;
     if (batch.harness === "codex") {
-      const {exitCode,stderr}=await d.spawn([d.codexBin,"queue","--thread",batch.host_session_id,"--message",wakeText(batch.message_ids)]);
-      await d.mark(batch.message_ids,exitCode===0,exitCode===0 ? undefined:`codex queue exit ${exitCode}: ${stderr.trim().slice(0,300)}`);
+      const {exitCode,stderr}=await d.spawn([d.codexBin,"queue","--thread",batch.host_session_id,"--message",wakeText(ids)]);
+      await d.mark(ids,exitCode===0,exitCode===0 ? undefined:`codex queue exit ${exitCode}: ${stderr.trim().slice(0,300)}`);
     } else {
-      d.emit(`WAKE claude-desktop ${batch.host_session_id} ${batch.message_ids.join(",")}`);
+      d.emit(`WAKE claude-desktop ${batch.host_session_id} ${ids.join(",")}`);
     }
   }
 }

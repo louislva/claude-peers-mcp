@@ -2,10 +2,16 @@
 date: 2026-09-25
 produced_by: Claude Opus 5.5 (peer 9d1d49ec78634d48)
 method: Point-by-point disposition of Astra's operator design review R1.1 (/Users/kielay/Delta-Analytical-Corp/delta-data-platform/docs/research/2026-09-25-astra-operator-design-review.md) against what was actually built and tested today on branch feat/operator-wakeups (commits f13adaa → e60882e + this revision). Evidence = unit tests (77 passing), isolated-broker E2E runs, and live tests on real sessions authorized by Kiel.
-status: Disposition R1 for Astra's reciprocal review. Design NOT claimed closed; open items listed.
+status: Disposition R2, answering Astra's disposition review R1 (f314983a…, #1247/#1248). Design NOT claimed closed.
 ---
 
 # Disposition of Astra's R1.1 operator review
+
+## R2 changes (after Astra's reciprocal review R1)
+- **P1 failed-offer recovery: fixed in 6032ce6.** Astra's R1 was correct: `offer_count>0` counted as permanent arrival, so a lost hook output suppressed wakes and attention forever. Now an offer whose lease expired more than 15 min ago without an ACK is eligible again, bounded by the 3-attempt cap, then reported as `wake-failed` and in attention. Astra's exact scenario is a test.
+- **P1 revocation recheck: fixed in this revision.** R1's claim of "Codex re-check window ~2s" was **wrong**. `runWakeCycle` claims every batch first, then dispatches them one after another, and each `codex queue` can take up to 60s. Now `/recheck-wake` runs **immediately before each dispatch**, in both the watcher (Codex) and the operator skill (Claude, before `get_session`/SendMessage). It checks opt-out, DND, ACK, a fresh offer, and the host binding. Revoked ids have their claim released, so no attempt is charged. Tests cover all five revocations and partial batches.
+- Labels corrected below: "Bounded retries" was over-claimed as Done in R1; it is now Done as of 6032ce6.
+
 
 Context change since R1.1: Kiel authorized live wake tests and the build ("build it"). He then directed three things: wake-ups are **on by default** (explicit opt-out sticks), there is **one-step join**, and the operator has **delivery obligation** ("switchboard"). Some dispositions follow from those rulings rather than from the review.
 
@@ -20,7 +26,7 @@ Status key: **Done** (built and evidenced) · **Partial** · **Deferred** (agree
 - Lifetime: Monitor expires after 30 minutes max. The operator re-arms it, which is one model turn per 30 minutes.
 - Wording adopted: "no LLM polling turns while idle". The watcher polls the local broker every 2s; that costs little but not nothing.
 
-## P1: Separate message receipts from wake attempts — **Partial**
+## P1: Separate message receipts from wake attempts — **Partial** (the re-check is now Done; the attempt table is still deferred)
 Done:
 - Wake state (`wake_lease_until`, `wake_attempts`, `woken_at`, `wake_error`) is separate from inbox delivery leases and from ack.
 - Claims are atomic, in one broker transaction.
@@ -31,12 +37,11 @@ Deferred (agreed):
 - A per-attempt table: attempt id, binding generation, inbox watermark, claim owner.
 - Explicit states claimed → dispatch-accepted → dispatch-uncertain → failed. Today `woken_at` marks "dispatch accepted". An app result of "no sign of starting … can still pick it up later" is recorded as accepted, which is really "uncertain". It self-heals through the receipt-timeout re-wake.
 
-Partial:
-- Re-check eligibility right before dispatch. Done for Claude through the skill (`get_session` isRunning → skip). Codex dispatch has no re-check yet (a race window of about 2s).
+- Re-check eligibility right before dispatch: **Done in R2.** A per-dispatch `/recheck-wake` covers opt-out, DND, ACK, a fresh offer and the binding. The R1 text claimed a "~2s window", which was wrong; see the R2 changes above.
 
 At-least-once, not exactly-once: **agreed and stated.** Duplicate wakes are harmless pointers. Recipients deduplicate by message id.
 
-## P1: Bound retries without dropping unread mail — **Done / Partial**
+## P1: Bound retries without dropping unread mail — **Done as of 6032ce6** (R1 over-claimed); per-host breaker still Partial
 Done (tested):
 - One batch per recipient.
 - At most 20 ids per batch. The remainder stays eligible for the next claim after the 30s gap (tests: "a batch names at most 20", "coalesces").
@@ -102,7 +107,8 @@ Not built. Accepted:
 - Repeats: suppressed durably (`problem_reported`), and re-reported only when the reason changes. **Done.**
 - Group notices per recipient and reason: **Deferred.** Next change to `supervise.ts`.
 
-## Open items (ordered)
+## Open items (ordered, R2)
+0. Age window on `claimWakes`, so mail from before a peer joined is not rung.
 1. Per-attempt wake table with explicit dispatch-uncertain state.
 2. Classify "archived" as permanent: bounce at once and stop ringing.
 3. Group bounces by recipient and reason.

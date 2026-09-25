@@ -256,6 +256,26 @@ export class PeerStore {
       return [...batches.values()];
     })();
   }
+  /**
+   * Re-check a claimed batch immediately before dispatch: opt-out, DND, ACK,
+   * a fresh offer, or an address change since the claim all revoke it.
+   * Revoked ids have their claim released (no attempt is charged).
+   */
+  recheckWake(hostSessionId: string, ids: number[]): number[] {
+    if (!Array.isArray(ids) || ids.length > 100 || !ids.every(n=>Number.isSafeInteger(n)&&n>0)) throw new Error("Expected 0-100 positive message IDs");
+    const now = this.now();
+    return this.db.transaction(() => {
+      const ok: number[] = [];
+      for (const id of ids) {
+        const row = this.db.query(`SELECT m.id FROM messages m JOIN peers p ON p.id=m.to_id
+          WHERE m.id=? AND m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?)
+            AND p.wake_policy='on' AND p.dnd_until<=? AND p.host_session_id=?`).get(id,now-WAKE_DEFAULTS.staleOfferMs,now,hostSessionId);
+        if (row) ok.push(id);
+        else this.db.run("UPDATE messages SET wake_lease_until=0,wake_attempts=MAX(0,wake_attempts-1) WHERE id=?", [id]);
+      }
+      return ok;
+    })();
+  }
   /** Report a wake outcome. Failure backs off exponentially (1, 2, 4 min...). */
   markWoken(ids: number[], ok: boolean, error?: string) {
     if (!Array.isArray(ids) || ids.length > 100 || !ids.every(n=>Number.isSafeInteger(n)&&n>0)) throw new Error("Expected 0-100 positive message IDs");

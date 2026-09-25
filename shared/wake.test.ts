@@ -209,3 +209,23 @@ describe("receipts for the operator's own actions are durable",()=>{
   expect(()=>f.store.send(f.claude,f.sender,"no",q)).toThrow("reply_to");
  });
 });
+
+describe("revocation is re-checked right before each dispatch (Astra P1)",()=>{
+ const host="01a0da28-f06c-7a62-b236-cf37ef228046";
+ test("still-eligible ids pass the re-check unchanged",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");f.store.claimWakes();
+  expect(f.store.recheckWake(host,[id])).toEqual([id]);
+ });
+ for (const [name,revoke] of [
+  ["opt-out",(f:any)=>f.store.optOut(f.codex)],
+  ["DND",(f:any)=>f.store.setDnd(f.codex,60_000)],
+  ["ACK",(f:any)=>{f.store.poll(f.codex);f.store.acknowledge(f.codex,f.store.poll(f.codex,true).map((m:any)=>m.id));}],
+  ["fresh offer",(f:any)=>f.store.poll(f.codex)],
+  ["address change",(f:any)=>f.store.optIn(f.codex,{harness:"codex",host_session_id:"01a0cfaf-460b-7ff3-a3b3-b7fc168b74f1"})],
+ ] as const) test(`${name} after the claim drops the id and releases the attempt`,()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");f.store.claimWakes();
+  revoke(f);
+  expect(f.store.recheckWake(host,[id])).toEqual([]);
+  expect(f.store.db.query("SELECT wake_attempts,wake_lease_until FROM messages WHERE id=?").get(id)).toEqual({wake_attempts:0,wake_lease_until:0});
+ });
+});

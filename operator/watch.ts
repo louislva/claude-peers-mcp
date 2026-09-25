@@ -31,6 +31,7 @@ const deps={
     return {exitCode,stderr:await new Response(p.stderr).text()};
   },
   emit:(line:string)=>console.log(line),
+  recheck:async(host:string,ids:number[])=>(await post<{message_ids:number[]}>("/recheck-wake",{host_session_id:host,message_ids:ids})).message_ids,
   codexBin:process.env.CODEX_BIN ?? "/opt/homebrew/bin/codex",
   selfHostId:process.env.CLAUDE_CODE_HOST_SESSION_ID,
 };

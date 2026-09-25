@@ -36,6 +36,7 @@ const server = Bun.serve({
         case "/opt-out": return Response.json(store.optOut(body.id));
         case "/set-dnd": return Response.json(store.setDnd(body.id,body.duration_ms));
         case "/claim-wakes": return Response.json({batches:store.claimWakes()});
+        case "/recheck-wake": return Response.json({message_ids:store.recheckWake(body.host_session_id,body.message_ids)});
         case "/mark-woken": return Response.json(store.markWoken(body.message_ids,body.ok===true,body.error));
         case "/mark-problem-reported": return Response.json(store.markProblemReported(body.message_id,body.reason));
         case "/delivery-problems": return Response.json({problems:store.deliveryProblems()});

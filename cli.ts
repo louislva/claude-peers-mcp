@@ -72,6 +72,7 @@ switch (cmd) {
   case "opt-out":
   case "dnd":
   case "mark-woken":
+  case "recheck":
   case "wake-attention": {
     // opt-in <peer> <harness> <host-id> | opt-out <peer> | dnd <peer> <minutes>
     // mark-woken <ids,comma> ok|fail [error...] | wake-attention
@@ -79,6 +80,7 @@ switch (cmd) {
     const [path,body]=cmd==="opt-in" ? ["/opt-in",{id:a[0],harness:a[1],host_session_id:a[2]}]
       :cmd==="opt-out" ? ["/opt-out",{id:a[0]}]
       :cmd==="dnd" ? ["/set-dnd",{id:a[0],duration_ms:Number(a[1])*60_000}]
+      :cmd==="recheck" ? ["/recheck-wake",{host_session_id:a[0],message_ids:(a[1]??"").split(",").filter(Boolean).map(Number)}]
       :cmd==="mark-woken" ? ["/mark-woken",{message_ids:(a[0]??"").split(",").filter(Boolean).map(Number),ok:a[1]==="ok",error:a.slice(2).join(" ")||undefined}]
       :["/wake-attention",{}];
     try { console.log(JSON.stringify(await brokerFetch(path as string,body),null,2)); }
