@@ -47,6 +47,23 @@ switch (cmd) {
     catch(e) { console.error(String(e)); process.exitCode=1; }
     break;
   }
+  case "opt-in":
+  case "opt-out":
+  case "dnd":
+  case "mark-woken":
+  case "wake-attention": {
+    // opt-in <peer> <harness> <host-id> | opt-out <peer> | dnd <peer> <minutes>
+    // mark-woken <ids,comma> ok|fail [error...] | wake-attention
+    const a=process.argv.slice(3);
+    const [path,body]=cmd==="opt-in" ? ["/opt-in",{id:a[0],harness:a[1],host_session_id:a[2]}]
+      :cmd==="opt-out" ? ["/opt-out",{id:a[0]}]
+      :cmd==="dnd" ? ["/set-dnd",{id:a[0],duration_ms:Number(a[1])*60_000}]
+      :cmd==="mark-woken" ? ["/mark-woken",{message_ids:(a[0]??"").split(",").filter(Boolean).map(Number),ok:a[1]==="ok",error:a.slice(2).join(" ")||undefined}]
+      :["/wake-attention",{}];
+    try { console.log(JSON.stringify(await brokerFetch(path as string,body),null,2)); }
+    catch(e) { console.error(String(e)); process.exitCode=1; }
+    break;
+  }
   case "status": {
     try {
       const health = await brokerFetch<{ status: string; peers: number }>("/health");
@@ -175,5 +192,10 @@ Usage:
   bun cli.ts bind <id> <session-key>   Bind a verified session identity
   bun cli.ts recover <id> <offline-id> Recover pending mail explicitly
   bun cli.ts send <id> <msg> Send a message to a peer
+  bun cli.ts opt-in <id> <codex|claude-desktop> <host-id>  Allow wake-ups
+  bun cli.ts opt-out <id>    Stop wake-ups (mail still stored)
+  bun cli.ts dnd <id> <minutes>  Do-not-disturb (0 clears)
+  bun cli.ts mark-woken <ids> ok|fail [error]  Operator: report a wake
+  bun cli.ts wake-attention  Mail whose wakes failed 3 times
   bun cli.ts kill-broker     Stop the broker daemon`);
 }

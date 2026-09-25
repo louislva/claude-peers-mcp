@@ -13,6 +13,7 @@
  *   { "claude-peers": { "command": "bun", "args": ["./server.ts"] } }
  */
 
+import { wakeIdentityFromEnv } from "./shared/wake-identity.ts";
 import { receiptEnvelope } from "./shared/receipts.ts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -213,6 +214,10 @@ const TOOLS = [
           type: "string" as const,
           description: "The message to send",
         },
+        reply_to: {
+          type: "integer" as const,
+          description: "Optional: the message ID you are replying to (threads the conversation on the human dashboard).",
+        },
       },
       required: ["to_id", "message"],
     },
@@ -243,6 +248,8 @@ const TOOLS = [
   },
   {name:"acknowledge_messages",description:"Confirm you received specified messages after reading them. Does not accept or complete work.",inputSchema:{type:"object" as const,properties:{message_ids:{type:"array" as const,items:{type:"integer" as const},minItems:1,maxItems:100}},required:["message_ids"]}},
   {name:"bind_session",description:"Bind THIS connection to its verified GUI session ID so hooks route correctly and resumed sessions recover their inbox. Never guess another task's ID.",inputSchema:{type:"object" as const,properties:{session_key:{type:"string" as const}},required:["session_key"]}},
+  {name:"set_wake",description:"Opt THIS session in or out of automatic wake-ups. When on, the claude-peers operator sends this session a fixed '[automated claude-peers wake — not from Kiel] message #N waiting' line when mail arrives while it is idle. The address comes from this session's own environment (Claude desktop host id or Codex thread id), never from arguments. Mail is stored and delivered by hooks either way.",inputSchema:{type:"object" as const,properties:{enabled:{type:"boolean" as const}},required:["enabled"]}},
+  {name:"set_dnd",description:"Do-not-disturb: suppress wake-ups to THIS session for the given minutes (0 clears). Mail is still stored and delivered at your next turn.",inputSchema:{type:"object" as const,properties:{minutes:{type:"integer" as const,minimum:0,maximum:10080}},required:["minutes"]}},
   {name:"recover_inbox",description:"Explicitly move pending messages from a verified offline inbox into this session. Inspect source identity first; never recover by cwd guessing.",inputSchema:{type:"object" as const,properties:{from_id:{type:"string" as const}},required:["from_id"]}},
 ];
 
@@ -261,6 +268,20 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const result=await brokerFetch<{id?:string}>(path,{...args,id:myId});
       if (name==="bind_session" && result.id) myId=result.id;
+      return {content:[{type:"text" as const,text:JSON.stringify(result)}]};
+    } catch(e) {return {isError:true,content:[{type:"text" as const,text:String(e)}]};}
+  }
+  if (name==="set_wake" || name==="set_dnd") {
+    if (!myId) return {isError:true,content:[{type:"text" as const,text:"Not registered with broker yet"}]};
+    try {
+      let result: unknown;
+      if (name==="set_dnd") result=await brokerFetch("/set-dnd",{id:myId,duration_ms:Number((args as {minutes:number}).minutes)*60_000});
+      else if ((args as {enabled:boolean}).enabled!==true) result=await brokerFetch("/opt-out",{id:myId});
+      else {
+        const identity=wakeIdentityFromEnv(process.env);
+        if (!identity) return {isError:true,content:[{type:"text" as const,text:"This session has no wake address (no CLAUDE_CODE_HOST_SESSION_ID or CODEX_THREAD_ID in its environment). CLI and unattended sessions cannot be woken; hooks still deliver mail at your next turn."}]};
+        result=await brokerFetch("/opt-in",{id:myId,...identity});
+      }
       return {content:[{type:"text" as const,text:JSON.stringify(result)}]};
     } catch(e) {return {isError:true,content:[{type:"text" as const,text:String(e)}]};}
   }
@@ -296,7 +317,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           if (p.git_root) parts.push(`Repo: ${p.git_root}`);
           if (p.tty) parts.push(`TTY: ${p.tty}`);
           if (p.summary) parts.push(`Summary: ${p.summary}`);
-          parts.push(`Status: ${p.online ? "online":"offline"}; pending: ${p.pending_count ?? 0}`);
+          parts.push(`Status: ${p.online ? "online":"offline"}; pending: ${p.pending_count ?? 0}; wake: ${p.wake_policy==="on" ? `on (${p.harness})`:"off"}${p.dnd_until && p.dnd_until>Date.now() ? " [DND]":""}`);
           parts.push(`Last seen: ${p.last_seen}`);
           return parts.join("\n  ");
         });
@@ -323,7 +344,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     case "send_message": {
-      const { to_id, message } = args as { to_id: string; message: string };
+      const { to_id, message, reply_to } = args as { to_id: string; message: string; reply_to?: number };
       if (!myId) {
         return {
           content: [{ type: "text" as const, text: "Not registered with broker yet" }],
@@ -335,6 +356,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           from_id: myId,
           to_id,
           text: message,
+          reply_to: reply_to ?? null,
         });
         if (!result.ok) {
           return {

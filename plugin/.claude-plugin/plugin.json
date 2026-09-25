@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "claude-peers",
   "displayName": "Claude Peers",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Peer discovery and messaging between Claude Code instances on this machine. Inbound peer messages arrive as claude/channel push instead of waiting for a poll.",
   "author": {
     "name": "Kiel Cassidy"

@@ -28,6 +28,21 @@ export class PeerStore {
       this.addColumn("messages", "acknowledged_at", "TEXT");
       this.addColumn("messages", "lease_until", "INTEGER NOT NULL DEFAULT 0");
       this.addColumn("messages", "offer_count", "INTEGER NOT NULL DEFAULT 0");
+      // Wake-ups (operator plan 2026-09-25). Opt-in, and kept separate from
+      // delivery: a wake only says "check your inbox"; it never offers or ACKs.
+      this.addColumn("peers", "harness", "TEXT");
+      this.addColumn("peers", "host_session_id", "TEXT");
+      this.addColumn("peers", "wake_policy", "TEXT NOT NULL DEFAULT 'off'");
+      this.addColumn("peers", "dnd_until", "INTEGER NOT NULL DEFAULT 0");
+      this.addColumn("peers", "last_wake_at", "INTEGER NOT NULL DEFAULT 0");
+      this.addColumn("messages", "reply_to", "INTEGER");
+      this.addColumn("messages", "woken_at", "INTEGER");
+      this.addColumn("messages", "wake_attempts", "INTEGER NOT NULL DEFAULT 0");
+      this.addColumn("messages", "wake_error", "TEXT");
+      this.addColumn("messages", "wake_lease_until", "INTEGER NOT NULL DEFAULT 0");
+      this.db.run(`CREATE TABLE IF NOT EXISTS wake_log (
+        id INTEGER PRIMARY KEY, peer_id TEXT NOT NULL, claimed_at INTEGER NOT NULL, message_ids TEXT NOT NULL)`);
+      this.db.run("CREATE INDEX IF NOT EXISTS wake_log_peer ON wake_log(peer_id, claimed_at)");
       this.db.run("CREATE UNIQUE INDEX IF NOT EXISTS peer_session_key ON peers(session_key) WHERE session_key IS NOT NULL");
       this.db.run("CREATE INDEX IF NOT EXISTS pending_inbox ON messages(to_id, delivered, lease_until, id)");
       this.db.run("CREATE TABLE IF NOT EXISTS peer_aliases (alias TEXT PRIMARY KEY, canonical TEXT NOT NULL)");
@@ -39,7 +54,7 @@ export class PeerStore {
       this.db.run(`INSERT INTO peers(id,pid,cwd,summary,registered_at,last_seen,online)
         SELECT DISTINCT to_id,0,'','Recovered legacy inbox; original session metadata unavailable',
           '', '',0 FROM messages WHERE delivered=0 AND to_id NOT IN (SELECT id FROM peers)`);
-      this.db.run("PRAGMA user_version = 2");
+      this.db.run("PRAGMA user_version = 3");
     })();
     this.cleanStale();
   }
@@ -134,10 +149,15 @@ export class PeerStore {
     return { id: peer.id };
   }
   unregister(id: string) { this.db.run("UPDATE peers SET online=0 WHERE id=?", [this.peer(id).id]); }
-  send(from: string, to: string, text: string) {
+  send(from: string, to: string, text: string, replyTo?: number | null) {
     if (typeof text !== "string" || !text.trim() || text.length > 64000) throw new Error("Message must contain 1-64000 characters");
     const target = this.peer(to);
-    const result = this.db.query("INSERT INTO messages(from_id,to_id,text,sent_at,delivered) VALUES(?,?,?,?,0)").run(this.canonical(from),target.id,text,new Date(this.now()).toISOString());
+    const sender = this.canonical(from);
+    if (replyTo !== undefined && replyTo !== null) {
+      const parent = Number.isSafeInteger(replyTo) ? this.db.query("SELECT from_id,to_id FROM messages WHERE id=?").get(replyTo) as {from_id:string,to_id:string} | null : null;
+      if (!parent || (parent.from_id !== sender && parent.to_id !== sender)) throw new Error("reply_to must reference a message the sender sent or received");
+    }
+    const result = this.db.query("INSERT INTO messages(from_id,to_id,text,sent_at,delivered,reply_to) VALUES(?,?,?,?,0,?)").run(sender,target.id,text,new Date(this.now()).toISOString(),replyTo ?? null);
     return { ok:true,id:Number(result.lastInsertRowid),to_id:target.id,queued:!this.isOnline(target) };
   }
   poll(id: string, force=false, leaseMs=30000): Message[] {
@@ -168,4 +188,85 @@ export class PeerStore {
       return { ok:true,recovered:result.changes,from_id:from.id,to_id:to.id };
     })();
   }
+  optIn(id: string, wake: { harness: WakeHarness; host_session_id: string }) {
+    const pattern = HOST_SESSION_PATTERNS[wake?.harness];
+    if (!pattern) throw new Error(`Unknown harness ${String(wake?.harness)}; expected ${Object.keys(HOST_SESSION_PATTERNS).join(" or ")}`);
+    if (typeof wake.host_session_id !== "string" || !pattern.test(wake.host_session_id)) throw new Error(`Malformed host session id for ${wake.harness}`);
+    const peer = this.peer(id);
+    this.db.run("UPDATE peers SET harness=?,host_session_id=?,wake_policy='on' WHERE id=?", [wake.harness,wake.host_session_id,peer.id]);
+    return { ok:true,id:peer.id,harness:wake.harness,host_session_id:wake.host_session_id };
+  }
+  optOut(id: string) {
+    const peer = this.peer(id);
+    this.db.run("UPDATE peers SET wake_policy='off' WHERE id=?", [peer.id]);
+    return { ok:true,id:peer.id };
+  }
+  /** Suppress wakes for durationMs from now; 0 clears. Mail is still stored and delivered by hooks. */
+  setDnd(id: string, durationMs: number) {
+    if (!Number.isSafeInteger(durationMs) || durationMs < 0 || durationMs > 7*24*3600_000) throw new Error("DND duration must be 0-7 days in ms");
+    const peer = this.peer(id), until = durationMs === 0 ? 0 : this.now()+durationMs;
+    this.db.run("UPDATE peers SET dnd_until=? WHERE id=?", [until,peer.id]);
+    return { ok:true,id:peer.id,dnd_until:until };
+  }
+  /**
+   * Atomically claim wake batches: one per opted-in recipient, for mail the
+   * recipient has never been offered. Offered mail means the recipient is
+   * active (its hooks are delivering), so it is not woken.
+   */
+  claimWakes(opts: Partial<typeof WAKE_DEFAULTS> = {}): WakeBatch[] {
+    const o = { ...WAKE_DEFAULTS, ...opts }, now = this.now();
+    return this.db.transaction(() => {
+      const rows = this.db.query(`SELECT m.id, p.id AS peer_id, p.harness, p.host_session_id FROM messages m
+        JOIN peers p ON p.id = m.to_id
+        WHERE m.delivered=0 AND m.offer_count=0 AND m.wake_attempts<? AND m.wake_lease_until<=?
+          AND (m.woken_at IS NULL OR m.woken_at<=?)
+          AND p.wake_policy='on' AND p.host_session_id IS NOT NULL AND p.dnd_until<=?
+          AND p.last_wake_at<=?
+          AND (SELECT COUNT(*) FROM wake_log w WHERE w.peer_id=p.id AND w.claimed_at>?)<?
+        ORDER BY m.id`).all(o.maxAttempts,now,now-o.receiptTimeoutMs,now,now-o.minGapMs,now-3600_000,o.maxPerHour) as {id:number,peer_id:string,harness:WakeHarness,host_session_id:string}[];
+      const batches = new Map<string,WakeBatch>();
+      for (const row of rows) {
+        const batch = batches.get(row.peer_id) ?? {peer_id:row.peer_id,harness:row.harness,host_session_id:row.host_session_id,message_ids:[]};
+        if (batch.message_ids.length < o.maxBatch) batch.message_ids.push(row.id);
+        batches.set(row.peer_id,batch);
+      }
+      for (const batch of batches.values()) {
+        for (const messageId of batch.message_ids) this.db.run("UPDATE messages SET wake_lease_until=?,wake_attempts=wake_attempts+1 WHERE id=?", [now+o.leaseMs,messageId]);
+        this.db.run("UPDATE peers SET last_wake_at=? WHERE id=?", [now,batch.peer_id]);
+        this.db.run("INSERT INTO wake_log(peer_id,claimed_at,message_ids) VALUES(?,?,?)", [batch.peer_id,now,JSON.stringify(batch.message_ids)]);
+      }
+      return [...batches.values()];
+    })();
+  }
+  /** Report a wake outcome. Failure backs off exponentially (1, 2, 4 min...). */
+  markWoken(ids: number[], ok: boolean, error?: string) {
+    if (!Array.isArray(ids) || ids.length > 100 || !ids.every(n=>Number.isSafeInteger(n)&&n>0)) throw new Error("Expected 0-100 positive message IDs");
+    const now = this.now();
+    return this.db.transaction(() => {
+      for (const id of ids) {
+        if (ok) this.db.run("UPDATE messages SET woken_at=?,wake_error=NULL,wake_lease_until=0 WHERE id=?", [now,id]);
+        else {
+          const row = this.db.query("SELECT wake_attempts FROM messages WHERE id=?").get(id) as {wake_attempts:number} | null;
+          const backoff = 60_000 * 2 ** Math.max(0,(row?.wake_attempts ?? 1)-1);
+          this.db.run("UPDATE messages SET wake_error=?,wake_lease_until=? WHERE id=?", [String(error ?? "wake failed").slice(0,500),now+backoff,id]);
+        }
+      }
+      return { ok:true,marked:ids.length };
+    })();
+  }
+  /** Undelivered mail whose wakes were exhausted: a human should look. */
+  wakeAttention(maxAttempts = WAKE_DEFAULTS.maxAttempts): Message[] {
+    return this.db.query("SELECT * FROM messages WHERE delivered=0 AND offer_count=0 AND wake_attempts>=? ORDER BY id").all(maxAttempts) as Message[];
+  }
 }
+
+export type WakeHarness = "codex" | "claude-desktop";
+export interface WakeBatch { peer_id: string; harness: WakeHarness; host_session_id: string; message_ids: number[] }
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+// Host ids reach a shell (`codex queue --thread`) and a session tool, so they
+// are validated to their exact shapes, never passed through as free text.
+const HOST_SESSION_PATTERNS: Record<string,RegExp> = {
+  "codex": new RegExp(`^${UUID}$`),
+  "claude-desktop": new RegExp(`^local_${UUID}$`),
+};
+export const WAKE_DEFAULTS = { leaseMs:60_000, minGapMs:30_000, receiptTimeoutMs:10*60_000, maxAttempts:3, maxPerHour:20, maxBatch:20 };
