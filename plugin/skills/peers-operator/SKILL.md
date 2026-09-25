@@ -28,6 +28,8 @@ When the prompt `peers-operator heartbeat` arrives, run `cd /Users/kielay/MCP/se
 - **`WATCHER-STUCK …`:** the loop is alive but one pass has run 15+ minutes. Send Kiel a **PushNotification** with the line. **Don't re-arm**; that would kill a pass that may be mid-dispatch.
 - **`BROKER-DOWN …`:** send Kiel a **PushNotification** with the line. Don't restart the broker yourself.
 - **After you've closed the switchboard** on Kiel's request, the heartbeat is deleted with it (see Close). If a tick still arrives, do nothing.
+**Keep the heartbeat alive.** Its limits (as documented for `CronCreate`): it fires only while this session is idle, so while you're mid-turn the 10 minutes is not guaranteed; and a recurring job expires after 7 days. So every time you re-arm Monitor (at least every 30 minutes), also run `CronList`. If no job with prompt `peers-operator heartbeat` exists, recreate it (Start step 4) and don't tell Kiel. A session that is stuck or dead can't run its own heartbeat at all; the independent watchdog (bean sg2s) covers that.
+
 The heartbeat exists because a lapsed watcher is silent: on 2026-09-25 it lapsed on a reload, nobody re-armed it, and mail sat unrung for 34 minutes. Never skip or shorten a tick because the last one was fine.
 
 ## Lines the watcher prints, and what you owe each one
