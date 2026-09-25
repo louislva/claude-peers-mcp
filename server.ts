@@ -278,7 +278,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (name==="set_dnd") result=await brokerFetch("/set-dnd",{id:myId,duration_ms:Number((args as {minutes:number}).minutes)*60_000});
       else if ((args as {enabled:boolean}).enabled!==true) result=await brokerFetch("/opt-out",{id:myId});
       else {
-        const identity=wakeIdentityFromEnv(process.env);
+        const identity=wakeIdentityFromEnv(process.env) ?? (Object.keys(process.env).some(k=>k.startsWith("CODEX_")) ? {harness:"codex" as const}:null);
         if (!identity) return {isError:true,content:[{type:"text" as const,text:"This session has no wake address (no CLAUDE_CODE_HOST_SESSION_ID or CODEX_THREAD_ID in its environment). CLI and unattended sessions cannot be woken; hooks still deliver mail at your next turn."}]};
         result=await brokerFetch("/opt-in",{id:myId,...identity});
       }

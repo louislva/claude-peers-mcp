@@ -126,3 +126,32 @@ describe("threading for the dashboard",()=>{
   expect(()=>f.store.send(f.codex,f.sender,"dangling",999999)).toThrow("reply_to");
  });
 });
+
+describe("participation is on by default",()=>{
+ const id={harness:"claude-desktop" as const,host_session_id:"local_2afc162d-c5db-4ebe-b6ed-6f799f288662"};
+ test("a bound session that never chose is opted in automatically",()=>{
+  const f=fixture();expect(f.store.autoOptIn(f.claude,id).wake_policy).toBe("on");
+  f.store.send(f.sender,f.claude,"x");expect(f.store.claimWakes().map(b=>b.host_session_id)).toEqual([id.host_session_id]);
+ });
+ test("an explicit opt-out sticks: automatic opt-in never overrides it",()=>{
+  const f=fixture();f.store.optOut(f.claude);
+  expect(f.store.autoOptIn(f.claude,id).wake_policy).toBe("off");
+  f.store.send(f.sender,f.claude,"x");expect(f.store.claimWakes()).toEqual([]);
+ });
+ test("an explicit opt-in after opting out re-enables and later automatic calls keep it on",()=>{
+  const f=fixture();f.store.optOut(f.claude);f.store.optIn(f.claude,id);
+  expect(f.store.autoOptIn(f.claude,id).wake_policy).toBe("on");
+ });
+ test("automatic opt-in refreshes a changed host address for an opted-in session",()=>{
+  const f=fixture();f.store.autoOptIn(f.claude,id);
+  const moved={harness:"claude-desktop" as const,host_session_id:"local_a7661a7f-932d-4a9a-aee7-eacd33e50365"};
+  f.store.autoOptIn(f.claude,moved);f.store.send(f.sender,f.claude,"x");
+  expect(f.store.claimWakes()[0]!.host_session_id).toBe(moved.host_session_id);
+ });
+});
+
+test("a Codex opt-in without a thread id uses the bound session key",()=>{
+ const f=fixture();f.store.bindSession(f.codex,"01a0da28-f06c-7a62-b236-cf37ef228046");
+ expect(f.store.optIn(f.codex,{harness:"codex"}).host_session_id).toBe("01a0da28-f06c-7a62-b236-cf37ef228046");
+ const g=fixture();expect(()=>g.store.optIn(g.codex,{harness:"codex"})).toThrow("host session");
+});

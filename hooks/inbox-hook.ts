@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 /** Session-bound, at-least-once inbox delivery. Never ACK on stdout/socket write. */
 import { receiptEnvelope } from "../shared/receipts.ts";
+import { hookWakeIdentity } from "../shared/wake-identity.ts";
 import type { Message, Peer } from "../shared/types.ts";
 
 const BROKER = `http://127.0.0.1:${process.env.CLAUDE_PEERS_PORT ?? "7899"}`;
@@ -48,6 +49,12 @@ try {
   }
   // Never guess based on cwd or parent PID: desktop tasks share these values.
   if (!peerId) process.exit(0);
+  // Wake-ups are on by default for bound GUI sessions (never overrides an
+  // explicit opt-out). Only for session-resolved peers, never --peer-id.
+  if (explicitIndex<0) {
+    const identity=hookWakeIdentity(process.env,session);
+    if (identity) await post("/auto-wake",{id:peerId,...identity}).catch(()=>{});
+  }
   const {messages}=await post<{messages:Message[]}>("/poll-messages",{id:peerId,protocol:2});
   if (!messages.length) process.exit(0);
   const text=receiptEnvelope(messages,peerId);

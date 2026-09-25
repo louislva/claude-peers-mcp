@@ -32,6 +32,7 @@ const server = Bun.serve({
         case "/resolve-session": return Response.json({peer:store.resolveSession(body.session_key)});
         case "/recover-inbox": return Response.json(store.recover(body.from_id,body.id));
         case "/opt-in": return Response.json(store.optIn(body.id,{harness:body.harness,host_session_id:body.host_session_id}));
+        case "/auto-wake": return Response.json(store.autoOptIn(body.id,{harness:body.harness,host_session_id:body.host_session_id}));
         case "/opt-out": return Response.json(store.optOut(body.id));
         case "/set-dnd": return Response.json(store.setDnd(body.id,body.duration_ms));
         case "/claim-wakes": return Response.json({batches:store.claimWakes()});

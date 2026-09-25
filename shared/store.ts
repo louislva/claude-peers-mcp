@@ -35,6 +35,8 @@ export class PeerStore {
       this.addColumn("peers", "wake_policy", "TEXT NOT NULL DEFAULT 'off'");
       this.addColumn("peers", "dnd_until", "INTEGER NOT NULL DEFAULT 0");
       this.addColumn("peers", "last_wake_at", "INTEGER NOT NULL DEFAULT 0");
+      // NULL = never chose (automatic opt-in applies); 'on'/'off' = explicit choice.
+      this.addColumn("peers", "wake_choice", "TEXT");
       this.addColumn("messages", "reply_to", "INTEGER");
       this.addColumn("messages", "woken_at", "INTEGER");
       this.addColumn("messages", "wake_attempts", "INTEGER NOT NULL DEFAULT 0");
@@ -188,18 +190,32 @@ export class PeerStore {
       return { ok:true,recovered:result.changes,from_id:from.id,to_id:to.id };
     })();
   }
-  optIn(id: string, wake: { harness: WakeHarness; host_session_id: string }) {
+  optIn(id: string, wake: { harness: WakeHarness; host_session_id?: string }) {
     const pattern = HOST_SESSION_PATTERNS[wake?.harness];
     if (!pattern) throw new Error(`Unknown harness ${String(wake?.harness)}; expected ${Object.keys(HOST_SESSION_PATTERNS).join(" or ")}`);
+    // A Codex MCP server may lack CODEX_THREAD_ID; its verified bound session key IS the thread id.
+    if (wake.host_session_id === undefined && wake.harness === "codex") wake = { ...wake, host_session_id: this.peer(id).session_key ?? undefined };
     if (typeof wake.host_session_id !== "string" || !pattern.test(wake.host_session_id)) throw new Error(`Malformed host session id for ${wake.harness}`);
     const peer = this.peer(id);
-    this.db.run("UPDATE peers SET harness=?,host_session_id=?,wake_policy='on' WHERE id=?", [wake.harness,wake.host_session_id,peer.id]);
+    this.db.run("UPDATE peers SET harness=?,host_session_id=?,wake_policy='on',wake_choice='on' WHERE id=?", [wake.harness,wake.host_session_id,peer.id]);
     return { ok:true,id:peer.id,harness:wake.harness,host_session_id:wake.host_session_id };
   }
   optOut(id: string) {
     const peer = this.peer(id);
-    this.db.run("UPDATE peers SET wake_policy='off' WHERE id=?", [peer.id]);
+    this.db.run("UPDATE peers SET wake_policy='off',wake_choice='off' WHERE id=?", [peer.id]);
     return { ok:true,id:peer.id };
+  }
+  /**
+   * Participation is on by default: hooks call this for every bound session.
+   * It never overrides an explicit opt-out, and it keeps the host address fresh.
+   */
+  autoOptIn(id: string, wake: { harness: WakeHarness; host_session_id: string }) {
+    const peer = this.peer(id) as Peer & { wake_choice?: string | null };
+    if (peer.wake_choice === "off") return { id:peer.id,wake_policy:"off" };
+    const pattern = HOST_SESSION_PATTERNS[wake?.harness];
+    if (!pattern || typeof wake.host_session_id !== "string" || !pattern.test(wake.host_session_id)) throw new Error("Malformed wake identity");
+    this.db.run("UPDATE peers SET harness=?,host_session_id=?,wake_policy='on' WHERE id=?", [wake.harness,wake.host_session_id,peer.id]);
+    return { id:peer.id,wake_policy:"on" };
   }
   /** Suppress wakes for durationMs from now; 0 clears. Mail is still stored and delivered by hooks. */
   setDnd(id: string, durationMs: number) {
