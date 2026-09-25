@@ -54,10 +54,22 @@ describe("retry, receipt timeout and give-up",()=>{
   f.advance(6*60_000);
   expect(f.store.claimWakes().map(b=>b.message_ids)).toEqual([[id]]);
  });
- test("a woken message the recipient then fetched is never re-woken",()=>{
+ test("a woken message the recipient fetched AND acknowledged is never re-woken",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
-  f.store.markWoken(f.store.claimWakes()[0]!.message_ids,true);f.store.poll(f.codex);f.advance(60*60_000);
-  expect(f.store.claimWakes()).toEqual([]);expect(id).toBeGreaterThan(0);
+  f.store.markWoken(f.store.claimWakes()[0]!.message_ids,true);f.store.poll(f.codex);f.store.acknowledge(f.codex,[id]);f.advance(60*60_000);
+  expect(f.store.claimWakes()).toEqual([]);expect(f.store.deliveryProblems()).toEqual([]);
+ });
+ test("Astra P1: an offer that never reached the model (lost hook output) is not a permanent receipt",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
+  f.store.poll(f.codex);                       // offered, then the hook's output is lost
+  f.advance(5*60_000);expect(f.store.claimWakes()).toEqual([]);   // recent offer: recipient may be mid-turn
+  f.advance(11*60_000);                        // offered 16 min ago, still unacked
+  expect(f.store.claimWakes().map(b=>b.message_ids)).toEqual([[id]]);
+  for(let i=0;i<2;i++){f.store.markWoken([id],true);f.advance(11*60_000);f.store.claimWakes();}
+  f.store.markWoken([id],true);f.advance(61*60_000);
+  expect(f.store.claimWakes()).toEqual([]);    // bounded: 3 attempts
+  expect(f.store.deliveryProblems().map(p=>p.reason)).toEqual(["wake-failed"]);
+  expect(f.store.wakeAttention().map(m=>m.id)).toEqual([id]);
  });
  test("failed wakes back off, stop after 3 attempts and surface as needing attention",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
