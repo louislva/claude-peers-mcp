@@ -116,3 +116,17 @@ Not built. Accepted:
 5. Causal-chain loop budgets.
 6. Dashboard v1 (read-only).
 7. Watcher self-reload on code change, so re-arming needs no manual step.
+
+## Review record (R1.4, 2026-09-25 5:20 PM)
+Astra **APPROVED** the claim corrections through **527ec2984e78e59f5a267b95ab13e0af7d2725e2**. Astra ran the exact extracted focused suites (68/68, 177 expects) and independent in-memory repros. Covered:
+- failed completion: no refund;
+- A-expire/B-claim: A's recheck and stale completion are rejected;
+- B's completion works;
+- duplicate completion is a no-op;
+- exact claim expiry cannot dispatch or refund.
+
+The failed-offer recovery fix (6032ce6) was approved earlier. Astra's review: `/Users/kielay/Delta-Analytical-Corp/delta-data-platform/docs/research/2026-09-25-astra-operator-disposition-review.md` (R1.4).
+
+Scope of the approval (Astra's wording, kept): **bounded approval, not integrated design closure or production certification.** Deferred acceptance cases are untested, and so is migration of in-flight legacy state (claims made under the retired `wake_lease_until`). The watcher's 3-second re-arm is recorded as Opus's observation, not Astra's.
+
+Open items remaining: 3 (group notices), 4 (two-watcher claim test), 5 (causal-chain budgets), 6 (dashboard), plus the claimWakes age window.
