@@ -37,6 +37,8 @@ const server = Bun.serve({
         case "/set-dnd": return Response.json(store.setDnd(body.id,body.duration_ms));
         case "/claim-wakes": return Response.json({batches:store.claimWakes()});
         case "/mark-woken": return Response.json(store.markWoken(body.message_ids,body.ok===true,body.error));
+        case "/mark-problem-reported": return Response.json(store.markProblemReported(body.message_id,body.reason));
+        case "/delivery-problems": return Response.json({problems:store.deliveryProblems()});
         case "/wake-attention": return Response.json({messages:store.wakeAttention()});
         case "/unregister": store.unregister(body.id); return Response.json({ok:true});
         default: return Response.json({error:"not found"},{status:404});

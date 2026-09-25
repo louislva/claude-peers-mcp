@@ -155,3 +155,45 @@ test("a Codex opt-in without a thread id uses the bound session key",()=>{
  expect(f.store.optIn(f.codex,{harness:"codex"}).host_session_id).toBe("01a0da28-f06c-7a62-b236-cf37ef228046");
  const g=fixture();expect(()=>g.store.optIn(g.codex,{harness:"codex"})).toThrow("host session");
 });
+
+describe("the operator answers for every message until it arrives",()=>{
+ test("mail to a session with no wake address is reported after a 2-minute grace, with the reason",()=>{
+  const f=fixture();const {id}=f.store.send(f.sender,f.codex,"x");
+  expect(f.store.deliveryProblems()).toEqual([]);f.advance(121_000);
+  expect(f.store.deliveryProblems()).toEqual([{message_id:id,from_id:f.sender,to_id:f.codex,reason:"no-wake-address"}]);
+ });
+ test("mail to an opted-out recipient is reported as waiting on their choice",()=>{
+  const f=fixture();optInBoth(f);f.store.optOut(f.codex);const {id}=f.store.send(f.sender,f.codex,"x");f.advance(121_000);
+  expect(f.store.deliveryProblems()).toEqual([{message_id:id,from_id:f.sender,to_id:f.codex,reason:"recipient-opted-out"}]);
+ });
+ test("exhausted wakes are reported with the last error",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
+  for(let i=0;i<3;i++){f.store.claimWakes();f.store.markWoken([id],false,"session is archived");f.advance(5*60_000);}
+  expect(f.store.deliveryProblems()).toEqual([{message_id:id,from_id:f.sender,to_id:f.codex,reason:"wake-failed",detail:"session is archived"}]);
+ });
+ test("mail woken but still not picked up after two receipt timeouts is reported",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.claude,"x");
+  f.store.markWoken(f.store.claimWakes()[0]!.message_ids,true);f.advance(21*60_000);
+  expect(f.store.deliveryProblems().map(p=>p.reason)).toEqual(["woken-not-picked-up"]);expect(id).toBeGreaterThan(0);
+ });
+ test("arrived mail, and old history outside the 24-hour window, are never reported",()=>{
+  const f=fixture();optInBoth(f);f.store.send(f.sender,f.codex,"old");f.advance(25*3600_000);
+  const {id}=f.store.send(f.sender,f.claude,"new");f.store.poll(f.claude);f.advance(121_000);
+  expect(f.store.deliveryProblems()).toEqual([]);expect(id).toBeGreaterThan(0);
+ });
+});
+
+describe("receipts for the operator's own actions are durable",()=>{
+ test("a reported problem is not reported again, even by a fresh watcher; a new reason is",()=>{
+  const f=fixture();const {id}=f.store.send(f.sender,f.codex,"x");f.advance(121_000);
+  expect(f.store.deliveryProblems()).toHaveLength(1);
+  f.store.markProblemReported(id,"no-wake-address");f.store.markProblemReported(id,"no-wake-address");
+  expect(f.store.deliveryProblems()).toEqual([]);
+  f.store.optOut(f.codex);expect(f.store.deliveryProblems().map(p=>p.reason)).toEqual(["recipient-opted-out"]);
+ });
+ test("the operator may thread a bounce onto any message; peers still may not reply to conversations they are not in",()=>{
+  const f=fixture();const q=f.store.send(f.sender,f.codex,"q").id;
+  expect(f.store.send("operator",f.sender,"bounce",q).id).toBeGreaterThan(q);
+  expect(()=>f.store.send(f.claude,f.sender,"no",q)).toThrow("reply_to");
+ });
+});

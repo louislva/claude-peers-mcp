@@ -34,6 +34,11 @@ async function brokerFetch<T>(path: string, body?: unknown): Promise<T> {
 
 const cmd = process.argv[2];
 
+function ppid(pid: number): number | undefined {
+  const out = new TextDecoder().decode(Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(pid)]).stdout).trim();
+  return out ? Number(out) : undefined;
+}
+
 switch (cmd) {
   case "inbox":
   case "ack":
@@ -45,6 +50,22 @@ switch (cmd) {
     const body=cmd==="inbox" ? {id,protocol:2,force:true}:cmd==="ack" ? {id,message_ids:process.argv.slice(4).map(Number)}:cmd==="bind" ? {id,session_key:process.argv[4]}:{id,from_id:process.argv[4]};
     try { console.log(JSON.stringify(await brokerFetch(path,body),null,2)); }
     catch(e) { console.error(String(e)); process.exitCode=1; }
+    break;
+  }
+  case "join": {
+    // One step, run from INSIDE the agent's own shell: bind + opt in + status.
+    const { joinSession } = await import("./shared/join.ts");
+    const i = process.argv.indexOf("--status");
+    const status = i >= 0 ? process.argv.slice(i + 1).join(" ") : undefined;
+    try {
+      const result = await joinSession({
+        env: process.env,
+        post: (path, body) => brokerFetch(path, body),
+        ancestors: () => { const chain: number[] = []; let pid: number | undefined = process.pid; while (pid && pid > 1 && chain.length < 30) { pid = ppid(pid); if (pid) chain.push(pid); } return chain; },
+        parentOf: ppid,
+      }, status);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (e) { console.error(String(e instanceof Error ? e.message : e)); process.exitCode = 1; }
     break;
   }
   case "opt-in":
@@ -192,6 +213,7 @@ Usage:
   bun cli.ts bind <id> <session-key>   Bind a verified session identity
   bun cli.ts recover <id> <offline-id> Recover pending mail explicitly
   bun cli.ts send <id> <msg> Send a message to a peer
+  bun cli.ts join [--status <text>]  From inside an agent's shell: bind + opt in + status, one step
   bun cli.ts opt-in <id> <codex|claude-desktop> <host-id>  Allow wake-ups
   bun cli.ts opt-out <id>    Stop wake-ups (mail still stored)
   bun cli.ts dnd <id> <minutes>  Do-not-disturb (0 clears)

@@ -37,6 +37,8 @@ export class PeerStore {
       this.addColumn("peers", "last_wake_at", "INTEGER NOT NULL DEFAULT 0");
       // NULL = never chose (automatic opt-in applies); 'on'/'off' = explicit choice.
       this.addColumn("peers", "wake_choice", "TEXT");
+      // Durable receipt of the operator's own report/bounce, keyed by reason.
+      this.addColumn("messages", "problem_reported", "TEXT");
       this.addColumn("messages", "reply_to", "INTEGER");
       this.addColumn("messages", "woken_at", "INTEGER");
       this.addColumn("messages", "wake_attempts", "INTEGER NOT NULL DEFAULT 0");
@@ -157,7 +159,7 @@ export class PeerStore {
     const sender = this.canonical(from);
     if (replyTo !== undefined && replyTo !== null) {
       const parent = Number.isSafeInteger(replyTo) ? this.db.query("SELECT from_id,to_id FROM messages WHERE id=?").get(replyTo) as {from_id:string,to_id:string} | null : null;
-      if (!parent || (parent.from_id !== sender && parent.to_id !== sender)) throw new Error("reply_to must reference a message the sender sent or received");
+      if (!parent || (sender !== "operator" && parent.from_id !== sender && parent.to_id !== sender)) throw new Error("reply_to must reference a message the sender sent or received");
     }
     const result = this.db.query("INSERT INTO messages(from_id,to_id,text,sent_at,delivered,reply_to) VALUES(?,?,?,?,0,?)").run(sender,target.id,text,new Date(this.now()).toISOString(),replyTo ?? null);
     return { ok:true,id:Number(result.lastInsertRowid),to_id:target.id,queued:!this.isOnline(target) };
@@ -270,6 +272,31 @@ export class PeerStore {
       return { ok:true,marked:ids.length };
     })();
   }
+  /**
+   * The operator's ledger: recent mail that has NOT arrived (never offered to
+   * the recipient) and why. Arrival = the recipient's hook/inbox fetched it.
+   */
+  deliveryProblems(graceMs = 120_000, windowMs = 24*3600_000): DeliveryProblem[] {
+    const now = this.now(), o = WAKE_DEFAULTS;
+    const rows = this.db.query(`SELECT m.id,m.from_id,m.to_id,m.sent_at,m.woken_at,m.wake_attempts,m.wake_error,m.problem_reported,p.wake_policy,p.wake_choice,p.host_session_id
+      FROM messages m LEFT JOIN peers p ON p.id=m.to_id
+      WHERE m.delivered=0 AND m.offer_count=0 AND m.sent_at>=? AND m.sent_at<=? ORDER BY m.id`)
+      .all(new Date(now-windowMs).toISOString(),new Date(now-graceMs).toISOString()) as any[];
+    const out: DeliveryProblem[] = [];
+    for (const r of rows) {
+      const base = {message_id:r.id,from_id:r.from_id,to_id:r.to_id};
+      if (r.wake_attempts >= o.maxAttempts) out.push({...base,reason:"wake-failed",detail:r.wake_error ?? "no error recorded"});
+      else if (r.wake_choice === "off") out.push({...base,reason:"recipient-opted-out"});
+      else if (r.wake_policy !== "on" || !r.host_session_id) out.push({...base,reason:"no-wake-address"});
+      else if (r.woken_at !== null && r.woken_at <= now - 2*o.receiptTimeoutMs) out.push({...base,reason:"woken-not-picked-up"});
+    }
+    return out.filter((p,i)=>rows.find(r=>r.id===p.message_id)?.problem_reported !== p.reason);
+  }
+  /** Idempotent: record that the operator reported/bounced this message for this reason. */
+  markProblemReported(id: number, reason: string) {
+    this.db.run("UPDATE messages SET problem_reported=? WHERE id=?", [String(reason).slice(0,50),id]);
+    return { ok:true };
+  }
   /** Undelivered mail whose wakes were exhausted: a human should look. */
   wakeAttention(maxAttempts = WAKE_DEFAULTS.maxAttempts): Message[] {
     return this.db.query("SELECT * FROM messages WHERE delivered=0 AND offer_count=0 AND wake_attempts>=? ORDER BY id").all(maxAttempts) as Message[];
@@ -277,6 +304,7 @@ export class PeerStore {
 }
 
 export type WakeHarness = "codex" | "claude-desktop";
+export interface DeliveryProblem { message_id: number; from_id: string; to_id: string; reason: string; detail?: string }
 export interface WakeBatch { peer_id: string; harness: WakeHarness; host_session_id: string; message_ids: number[] }
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 // Host ids reach a shell (`codex queue --thread`) and a session tool, so they
