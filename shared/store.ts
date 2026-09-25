@@ -48,7 +48,7 @@ export class PeerStore {
       // Causal chain (open item 5): conversation root and hop count via reply_to.
       this.addColumn("messages", "root_id", "INTEGER");
       this.addColumn("messages", "hop", "INTEGER NOT NULL DEFAULT 0");
-      this.db.run("CREATE TABLE IF NOT EXISTS root_releases (root_id INTEGER PRIMARY KEY, released_at INTEGER NOT NULL)");
+      this.db.run("CREATE TABLE IF NOT EXISTS activity_alerts (key TEXT PRIMARY KEY, alerted_count INTEGER NOT NULL, alerted_at INTEGER NOT NULL)");
       this.addColumn("messages", "reply_to", "INTEGER");
       this.addColumn("messages", "woken_at", "INTEGER");
       this.addColumn("messages", "wake_attempts", "INTEGER NOT NULL DEFAULT 0");
@@ -252,15 +252,13 @@ export class PeerStore {
   claimWakes(opts: Partial<typeof WAKE_DEFAULTS> = {}): WakeBatch[] {
     const o = { ...WAKE_DEFAULTS, ...opts }, now = this.now();
     return this.db.transaction(() => {
-      const OVER_BUDGET = this.overBudgetSql(now);
       const rows = this.db.query(`SELECT m.id, p.id AS peer_id, p.harness, p.host_session_id FROM messages m
         JOIN peers p ON p.id = m.to_id
-        WHERE m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?) AND m.wake_attempts<? AND m.wake_claim_until<=? AND m.wake_retry_after<=? AND m.sent_at>=? AND NOT ${OVER_BUDGET}
+        WHERE m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?) AND m.wake_attempts<? AND m.wake_claim_until<=? AND m.wake_retry_after<=? AND m.sent_at>=?
           AND (m.woken_at IS NULL OR m.woken_at<=?)
           AND p.wake_policy='on' AND p.host_session_id IS NOT NULL AND p.dnd_until<=?
           AND p.last_wake_at<=?
-          AND (SELECT COUNT(*) FROM wake_log w WHERE w.peer_id=p.id AND w.claimed_at>?)<?
-        ORDER BY m.id`).all(now-o.staleOfferMs,o.maxAttempts,now,now,new Date(now-o.windowMs).toISOString(),now-o.receiptTimeoutMs,now,now-o.minGapMs,now-3600_000,o.maxPerHour) as {id:number,peer_id:string,harness:WakeHarness,host_session_id:string}[];
+        ORDER BY m.id`).all(now-o.staleOfferMs,o.maxAttempts,now,now,new Date(now-o.windowMs).toISOString(),now-o.receiptTimeoutMs,now,now-o.minGapMs) as {id:number,peer_id:string,harness:WakeHarness,host_session_id:string}[];
       const batches = new Map<string,WakeBatch>();
       for (const row of rows) {
         const batch = batches.get(row.peer_id) ?? {peer_id:row.peer_id,harness:row.harness,host_session_id:row.host_session_id,message_ids:[]};
@@ -338,15 +336,14 @@ export class PeerStore {
    */
   deliveryProblems(graceMs = 120_000, windowMs = 24*3600_000): DeliveryProblem[] {
     const now = this.now(), o = WAKE_DEFAULTS;
-    const rows = this.db.query(`SELECT m.id,m.from_id,m.to_id,m.sent_at,m.woken_at,m.wake_attempts,m.wake_error,m.problem_reported,m.root_id,(${this.overBudgetSql(now)}) AS over_budget,p.wake_policy,p.wake_choice,p.host_session_id
+    const rows = this.db.query(`SELECT m.id,m.from_id,m.to_id,m.sent_at,m.woken_at,m.wake_attempts,m.wake_error,m.problem_reported,m.root_id,p.wake_policy,p.wake_choice,p.host_session_id
       FROM messages m LEFT JOIN peers p ON p.id=m.to_id
       WHERE m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?) AND m.sent_at>=? AND m.sent_at<=? ORDER BY m.id`)
       .all(now-o.staleOfferMs,new Date(now-windowMs).toISOString(),new Date(now-graceMs).toISOString()) as any[];
     const out: DeliveryProblem[] = [];
     for (const r of rows) {
       const base = {message_id:r.id,from_id:r.from_id,to_id:r.to_id};
-      if (r.over_budget) out.push({...base,reason:"loop-budget",detail:`conversation #${r.root_id} exceeded ${o.rootBudgetPerHour} messages/hour; release with: bun cli.ts release-root ${r.root_id}`});
-      else if (r.wake_attempts >= o.maxAttempts) out.push({...base,reason:"wake-failed",detail:r.wake_error ?? "no error recorded"});
+      if (r.wake_attempts >= o.maxAttempts) out.push({...base,reason:"wake-failed",detail:r.wake_error ?? "no error recorded"});
       else if (r.wake_choice === "off") out.push({...base,reason:"recipient-opted-out"});
       else if (r.wake_policy !== "on" || !r.host_session_id) out.push({...base,reason:"no-wake-address"});
       else if (r.woken_at !== null && r.woken_at <= now - 2*o.receiptTimeoutMs) out.push({...base,reason:"woken-not-picked-up"});
@@ -356,17 +353,33 @@ export class PeerStore {
     return out.flatMap(p => rows.find(r=>r.id===p.message_id)?.problem_reported !== p.reason ? [p]
       : p.reason === "no-wake-address" ? [{...p,already_reported:true}] : []);
   }
-  /** SQL predicate (alias m): m's conversation sent more than the hourly budget and was not released since. */
-  private overBudgetSql(now: number) {
-    const since = new Date(now-3600_000).toISOString();
-    return `(m.root_id IS NOT NULL AND (SELECT COUNT(*) FROM messages r WHERE r.root_id=m.root_id AND r.sent_at>='${since}'
-      AND r.sent_at>=COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%fZ',released_at/1000.0,'unixepoch') FROM root_releases rr WHERE rr.root_id=m.root_id),'')) > ${WAKE_DEFAULTS.rootBudgetPerHour})`;
-  }
-  /** Human release of a conversation that tripped the loop budget (counting restarts now). */
-  releaseRoot(rootId: number) {
-    if (!Number.isSafeInteger(rootId) || rootId <= 0) throw new Error("Expected a conversation root id");
-    this.db.run("INSERT OR REPLACE INTO root_releases(root_id,released_at) VALUES(?,?)", [rootId,this.now()]);
-    return { ok:true,root_id:rootId };
+  /**
+   * Alerts, never gates (Kiel 2026-09-25: "alert, don't block"). Returns
+   * conversations that crossed another multiple of activityAlertEvery
+   * messages, and peers rung more than wakeRateAlertPerHour times in the
+   * last hour. Each alert is returned once (durably recorded).
+   */
+  activityAlerts(): { kind: "conversation" | "wake-rate"; id: string; count: number; participants?: string[] }[] {
+    const now = this.now(), o = WAKE_DEFAULTS, out: { kind: "conversation" | "wake-rate"; id: string; count: number; participants?: string[] }[] = [];
+    return this.db.transaction(() => {
+      const roots = this.db.query(`SELECT m.root_id AS root, COUNT(*) AS n, COALESCE(a.alerted_count,0) AS last
+        FROM messages m LEFT JOIN activity_alerts a ON a.key='root:'||m.root_id
+        WHERE m.root_id IS NOT NULL GROUP BY m.root_id HAVING n >= last + ?`).all(o.activityAlertEvery) as {root:number,n:number,last:number}[];
+      for (const r of roots) {
+        const count = Math.floor(r.n / o.activityAlertEvery) * o.activityAlertEvery;
+        const participants = (this.db.query("SELECT DISTINCT from_id AS id FROM messages WHERE root_id=? UNION SELECT DISTINCT to_id FROM messages WHERE root_id=?").all(r.root,r.root) as {id:string}[]).map(x=>x.id).sort();
+        this.db.run("INSERT OR REPLACE INTO activity_alerts(key,alerted_count,alerted_at) VALUES(?,?,?)", [`root:${r.root}`,count,now]);
+        out.push({ kind:"conversation", id:String(r.root), count, participants });
+      }
+      const peers = this.db.query(`SELECT w.peer_id AS peer, COUNT(*) AS n FROM wake_log w
+        LEFT JOIN activity_alerts a ON a.key='rate:'||w.peer_id
+        WHERE w.claimed_at>? AND (a.alerted_at IS NULL OR a.alerted_at<=?) GROUP BY w.peer_id HAVING n > ?`).all(now-3600_000,now-3600_000,o.wakeRateAlertPerHour) as {peer:string,n:number}[];
+      for (const r of peers) {
+        this.db.run("INSERT OR REPLACE INTO activity_alerts(key,alerted_count,alerted_at) VALUES(?,?,?)", [`rate:${r.peer}`,r.n,now]);
+        out.push({ kind:"wake-rate", id:r.peer, count:r.n });
+      }
+      return out;
+    })();
   }
   /** Idempotent: record that the operator reported/bounced this message for this reason. */
   markProblemReported(id: number, reason: string) {
@@ -391,4 +404,4 @@ const HOST_SESSION_PATTERNS: Record<string,RegExp> = {
 };
 // staleOfferMs: an offer not acknowledged this long after its lease expired is not treated
 // as arrival (the hook output may never have reached the model; Astra P1).
-export const WAKE_DEFAULTS = { rootBudgetPerHour:30, windowMs:24*3600_000, staleOfferMs:15*60_000, leaseMs:60_000, minGapMs:30_000, receiptTimeoutMs:10*60_000, maxAttempts:3, maxPerHour:20, maxBatch:20 };
+export const WAKE_DEFAULTS = { activityAlertEvery:25, wakeRateAlertPerHour:20, windowMs:24*3600_000, staleOfferMs:15*60_000, leaseMs:60_000, minGapMs:30_000, receiptTimeoutMs:10*60_000, maxAttempts:3, maxBatch:20 };

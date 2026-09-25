@@ -99,10 +99,11 @@ describe("recipient controls and loop guards",()=>{
   f.advance(61_000);expect(f.store.claimWakes().map(b=>b.peer_id)).toEqual([f.claude]);
   expect(f.store.poll(f.codex,true)).toHaveLength(1);
  });
- test("at most 20 wakes per recipient per hour; excess waits, it is not dropped",()=>{
+ test("no hourly gate: the 21st wake in an hour still rings, and a wake-rate alert fires once",()=>{
   const f=fixture();optInBoth(f);
-  for(let i=0;i<21;i++){f.store.send(f.sender,f.codex,`m${i}`);const b=ring(f);if(i<20)expect(b).toHaveLength(1);else expect(b).toEqual([]);f.advance(31_000);}
-  f.advance(60*60_000);expect(f.store.claimWakes()).toHaveLength(1);
+  for(let i=0;i<21;i++){f.store.send(f.sender,f.codex,`m${i}`);expect(ring(f)).toHaveLength(1);f.advance(31_000);}
+  expect(f.store.activityAlerts()).toEqual([{kind:"wake-rate",id:f.codex,count:21}]);
+  expect(f.store.activityAlerts()).toEqual([]);   // once per hour, not per wake
  });
  test("wakes to one recipient are at least 30 seconds apart; new mail coalesces into the next batch",()=>{
   const f=fixture();optInBoth(f);const a=f.store.send(f.sender,f.codex,"a").id;
@@ -358,21 +359,22 @@ describe("age window (open item 0)",()=>{
  });
 });
 
-describe("causal-chain budget (open item 5)",()=>{
+describe("long conversations: alerts, never gates (open item 5, Kiel 2026-09-25)",()=>{
  test("replies carry the conversation root and hop count",()=>{
   const f=fixture();const a=f.store.send(f.sender,f.codex,"q").id;const b=f.store.send(f.codex,f.sender,"a",a).id;const c=f.store.send(f.sender,f.claude,"fwd",b).id;
   expect(f.store.db.query("SELECT id,root_id,hop FROM messages WHERE id IN (?,?,?) ORDER BY id").all(a,b,c)).toEqual([{id:a,root_id:a,hop:0},{id:b,root_id:a,hop:1},{id:c,root_id:a,hop:2}]);
  });
- test("a conversation over its hourly budget stops ringing (mail kept), shows up in the ledger, and a manual release restores it",()=>{
+ test("long conversations are never gated: every 25 messages the operator gets one alert, and rings continue",()=>{
   const f=fixture();optInBoth(f);
   let last=f.store.send(f.sender,f.codex,"start").id;
-  for(let i=1;i<WAKE_DEFAULTS.rootBudgetPerHour;i++){last=f.store.send(i%2?f.codex:f.sender,i%2?f.sender:f.codex,`r${i}`,last).id;}
-  f.store.db.run("UPDATE messages SET offer_count=1,delivered=1");        // earlier turns were handled
-  const over=f.store.send(f.sender,f.codex,"one more",last).id;          // exceeds the budget for this root
-  expect(f.store.claimWakes()).toEqual([]);
-  f.advance(121_000);
-  expect(f.store.deliveryProblems().map(p=>[p.message_id,p.reason])).toEqual([[over,"loop-budget"]]);
-  f.store.releaseRoot((f.store.db.query("SELECT root_id FROM messages WHERE id=?").get(over) as any).root_id);
-  expect(f.store.claimWakes().map(b=>b.message_ids)).toEqual([[over]]);
+  for(let i=1;i<60;i++){last=f.store.send(i%2?f.codex:f.sender,i%2?f.sender:f.codex,`r${i}`,last).id;}
+  const root=(f.store.db.query("SELECT root_id FROM messages WHERE id=?").get(last) as any).root_id;
+  expect(f.store.activityAlerts()).toEqual([{kind:"conversation",id:String(root),count:50,participants:[f.codex,f.sender].sort()}]);
+  expect(f.store.activityAlerts()).toEqual([]);
+  f.store.db.run("UPDATE messages SET offer_count=1,delivered=1");
+  last=f.store.send(f.sender,f.codex,"turn 61",last).id;
+  expect(f.store.claimWakes().map(b=>b.message_ids)).toEqual([[last]]);   // still rings
+  for(let i=0;i<14;i++)last=f.store.send(f.sender,f.codex,`more${i}`,last).id;
+  expect(f.store.activityAlerts().map(a=>a.count)).toEqual([75]);
  });
 });

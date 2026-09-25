@@ -51,6 +51,11 @@ async function pass(){
   // proven, bounce to the caller, and hand the rest to the operator model.
   const {problems}=await post<{problems:DeliveryProblem[]}>("/delivery-problems");
   await superviseDelivery(problems,supervise as any,seen);
+  // Alerts, never gates: the operator pushes these to Kiel's phone.
+  const {alerts}=await post<{alerts:{kind:string,id:string,count:number,participants?:string[]}[]}>("/activity-alerts");
+  for(const a of alerts) console.log(a.kind==="conversation"
+    ? `ACTIVITY conversation #${a.id} reached ${a.count} messages among ${(a.participants??[]).join(", ")}`
+    : `ACTIVITY peer ${a.id} was rung ${a.count} times in the last hour`);
 }
 // Self-reload (open item 7): if any watcher/broker-client source changes,
 // print RELOAD and exit; the operator re-arms Monitor, loading the new code.

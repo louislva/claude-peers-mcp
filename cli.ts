@@ -72,7 +72,6 @@ switch (cmd) {
   case "opt-out":
   case "dnd":
   case "mark-woken":
-  case "release-root":
   case "recheck":
   case "wake-attention": {
     // opt-in <peer> <harness> <host-id> | opt-out <peer> | dnd <peer> <minutes>
@@ -83,7 +82,6 @@ switch (cmd) {
     const [path,body]=cmd==="opt-in" ? ["/opt-in",{id:a[0],harness:a[1],host_session_id:a[2]}]
       :cmd==="opt-out" ? ["/opt-out",{id:a[0]}]
       :cmd==="dnd" ? ["/set-dnd",{id:a[0],duration_ms:Number(a[1])*60_000}]
-      :cmd==="release-root" ? ["/release-root",{root_id:Number(a[0])}]
       :cmd==="recheck" ? ["/recheck-wake",{host_session_id:a[0],message_ids:(a[1]??"").split(",").filter(Boolean).map(Number),attempt_id:attemptArg}]
       :cmd==="mark-woken" ? ["/mark-woken",{message_ids:(a[0]??"").split(",").filter(Boolean).map(Number),ok:a[1]==="ok"||a[1]==="uncertain",uncertain:a[1]==="uncertain",error:a.slice(2).filter(x=>!x.startsWith("attempt=")).join(" ")||undefined,attempt_id:attemptArg}]
       :["/wake-attention",{}];
@@ -224,7 +222,6 @@ Usage:
   bun cli.ts opt-out <id>    Stop wake-ups (mail still stored)
   bun cli.ts dnd <id> <minutes>  Do-not-disturb (0 clears)
   bun cli.ts mark-woken <ids> ok|fail [error]  Operator: report a wake
-  bun cli.ts release-root <id>  Human: let a conversation over its loop budget ring again
   bun cli.ts wake-attention  Mail whose wakes failed 3 times
   bun cli.ts kill-broker     Stop the broker daemon`);
 }

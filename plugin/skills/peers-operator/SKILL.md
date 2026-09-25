@@ -39,8 +39,9 @@ Repo: `/Users/kielay/MCP/servers/claude-peers-mcp`. Plan: `docs/research/2026-09
 | `no-wake-address` | recipient never joined (no Claude desktop / Codex address on file) | Tell Kiel: "ask <peer> to run peers-wake (join)". Its hook will also auto-join it at its next prompt. |
 | `recipient-opted-out` | recipient explicitly opted out | Tell Kiel once; the call waits for them. |
 | `wake-failed (<error>)` | 3 wake attempts failed | Read the error. "archived" → Kiel must unarchive or re-address. Mode mismatch → Kiel switches a mode. Unknown → quote the error. |
-| `loop-budget` | a conversation passed 30 messages/hour; rings paused, mail still delivered | Tell Kiel; only Kiel releases it (`bun cli.ts release-root <id>`). Never release it yourself. |
 | `woken-not-picked-up` | rang it, nobody answered for 20+ min | Ring once more by hand (the WAKE step for that id), then tell Kiel the session may be stuck and needs a look. |
+
+**`ACTIVITY …`**: a conversation reached another 25 messages, or a peer was rung more than 20 times in an hour. Send Kiel a **PushNotification** with the line as-is. **Don't stop, slow or gate anything.** Long-running agent work is often intended, and deciding to intervene is Kiel's job, not the switchboard's.
 
 **`RELOAD …`**, or the Monitor ending for any reason (expiry, exit, crash): re-arm Monitor **immediately** with the same command. No need to tell Kiel unless re-arming fails.
 
