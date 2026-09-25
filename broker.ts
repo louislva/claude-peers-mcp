@@ -39,6 +39,7 @@ const server = Bun.serve({
         case "/recheck-wake": return Response.json({message_ids:store.recheckWake(body.host_session_id,body.message_ids,body.attempt_id)});
         case "/mark-woken": return Response.json(store.markWoken(body.message_ids,body.ok===true,body.error,body.attempt_id,body.uncertain===true,body.permanent===true));
         case "/mark-problem-reported": return Response.json(store.markProblemReported(body.message_id,body.reason));
+        case "/release-root": return Response.json(store.releaseRoot(body.root_id));
         case "/delivery-problems": return Response.json({problems:store.deliveryProblems()});
         case "/wake-attention": return Response.json({messages:store.wakeAttention()});
         case "/unregister": store.unregister(body.id); return Response.json({ok:true});

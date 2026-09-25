@@ -45,6 +45,10 @@ export class PeerStore {
       // from a failed attempt's retry-not-before. wake_lease_until is retired.
       this.addColumn("messages", "wake_claim_until", "INTEGER NOT NULL DEFAULT 0");
       this.addColumn("messages", "wake_retry_after", "INTEGER NOT NULL DEFAULT 0");
+      // Causal chain (open item 5): conversation root and hop count via reply_to.
+      this.addColumn("messages", "root_id", "INTEGER");
+      this.addColumn("messages", "hop", "INTEGER NOT NULL DEFAULT 0");
+      this.db.run("CREATE TABLE IF NOT EXISTS root_releases (root_id INTEGER PRIMARY KEY, released_at INTEGER NOT NULL)");
       this.addColumn("messages", "reply_to", "INTEGER");
       this.addColumn("messages", "woken_at", "INTEGER");
       this.addColumn("messages", "wake_attempts", "INTEGER NOT NULL DEFAULT 0");
@@ -172,7 +176,10 @@ export class PeerStore {
       const parent = Number.isSafeInteger(replyTo) ? this.db.query("SELECT from_id,to_id FROM messages WHERE id=?").get(replyTo) as {from_id:string,to_id:string} | null : null;
       if (!parent || (sender !== "operator" && parent.from_id !== sender && parent.to_id !== sender)) throw new Error("reply_to must reference a message the sender sent or received");
     }
-    const result = this.db.query("INSERT INTO messages(from_id,to_id,text,sent_at,delivered,reply_to) VALUES(?,?,?,?,0,?)").run(sender,target.id,text,new Date(this.now()).toISOString(),replyTo ?? null);
+    const parent = replyTo ? this.db.query("SELECT id,root_id,hop FROM messages WHERE id=?").get(replyTo) as {id:number,root_id:number|null,hop:number} | null : null;
+    const result = this.db.query("INSERT INTO messages(from_id,to_id,text,sent_at,delivered,reply_to,root_id,hop) VALUES(?,?,?,?,0,?,?,?)")
+      .run(sender,target.id,text,new Date(this.now()).toISOString(),replyTo ?? null,parent ? (parent.root_id ?? parent.id) : null,parent ? parent.hop+1 : 0);
+    if (!parent) this.db.run("UPDATE messages SET root_id=id WHERE id=?", [Number(result.lastInsertRowid)]);
     return { ok:true,id:Number(result.lastInsertRowid),to_id:target.id,queued:!this.isOnline(target) };
   }
   poll(id: string, force=false, leaseMs=30000): Message[] {
@@ -245,9 +252,10 @@ export class PeerStore {
   claimWakes(opts: Partial<typeof WAKE_DEFAULTS> = {}): WakeBatch[] {
     const o = { ...WAKE_DEFAULTS, ...opts }, now = this.now();
     return this.db.transaction(() => {
+      const OVER_BUDGET = this.overBudgetSql(now);
       const rows = this.db.query(`SELECT m.id, p.id AS peer_id, p.harness, p.host_session_id FROM messages m
         JOIN peers p ON p.id = m.to_id
-        WHERE m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?) AND m.wake_attempts<? AND m.wake_claim_until<=? AND m.wake_retry_after<=? AND m.sent_at>=?
+        WHERE m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?) AND m.wake_attempts<? AND m.wake_claim_until<=? AND m.wake_retry_after<=? AND m.sent_at>=? AND NOT ${OVER_BUDGET}
           AND (m.woken_at IS NULL OR m.woken_at<=?)
           AND p.wake_policy='on' AND p.host_session_id IS NOT NULL AND p.dnd_until<=?
           AND p.last_wake_at<=?
@@ -330,14 +338,15 @@ export class PeerStore {
    */
   deliveryProblems(graceMs = 120_000, windowMs = 24*3600_000): DeliveryProblem[] {
     const now = this.now(), o = WAKE_DEFAULTS;
-    const rows = this.db.query(`SELECT m.id,m.from_id,m.to_id,m.sent_at,m.woken_at,m.wake_attempts,m.wake_error,m.problem_reported,p.wake_policy,p.wake_choice,p.host_session_id
+    const rows = this.db.query(`SELECT m.id,m.from_id,m.to_id,m.sent_at,m.woken_at,m.wake_attempts,m.wake_error,m.problem_reported,m.root_id,(${this.overBudgetSql(now)}) AS over_budget,p.wake_policy,p.wake_choice,p.host_session_id
       FROM messages m LEFT JOIN peers p ON p.id=m.to_id
       WHERE m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?) AND m.sent_at>=? AND m.sent_at<=? ORDER BY m.id`)
       .all(now-o.staleOfferMs,new Date(now-windowMs).toISOString(),new Date(now-graceMs).toISOString()) as any[];
     const out: DeliveryProblem[] = [];
     for (const r of rows) {
       const base = {message_id:r.id,from_id:r.from_id,to_id:r.to_id};
-      if (r.wake_attempts >= o.maxAttempts) out.push({...base,reason:"wake-failed",detail:r.wake_error ?? "no error recorded"});
+      if (r.over_budget) out.push({...base,reason:"loop-budget",detail:`conversation #${r.root_id} exceeded ${o.rootBudgetPerHour} messages/hour; release with: bun cli.ts release-root ${r.root_id}`});
+      else if (r.wake_attempts >= o.maxAttempts) out.push({...base,reason:"wake-failed",detail:r.wake_error ?? "no error recorded"});
       else if (r.wake_choice === "off") out.push({...base,reason:"recipient-opted-out"});
       else if (r.wake_policy !== "on" || !r.host_session_id) out.push({...base,reason:"no-wake-address"});
       else if (r.woken_at !== null && r.woken_at <= now - 2*o.receiptTimeoutMs) out.push({...base,reason:"woken-not-picked-up"});
@@ -346,6 +355,18 @@ export class PeerStore {
     // (flagged) so the operator keeps trying to connect them from evidence.
     return out.flatMap(p => rows.find(r=>r.id===p.message_id)?.problem_reported !== p.reason ? [p]
       : p.reason === "no-wake-address" ? [{...p,already_reported:true}] : []);
+  }
+  /** SQL predicate (alias m): m's conversation sent more than the hourly budget and was not released since. */
+  private overBudgetSql(now: number) {
+    const since = new Date(now-3600_000).toISOString();
+    return `(m.root_id IS NOT NULL AND (SELECT COUNT(*) FROM messages r WHERE r.root_id=m.root_id AND r.sent_at>='${since}'
+      AND r.sent_at>=COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%fZ',released_at/1000.0,'unixepoch') FROM root_releases rr WHERE rr.root_id=m.root_id),'')) > ${WAKE_DEFAULTS.rootBudgetPerHour})`;
+  }
+  /** Human release of a conversation that tripped the loop budget (counting restarts now). */
+  releaseRoot(rootId: number) {
+    if (!Number.isSafeInteger(rootId) || rootId <= 0) throw new Error("Expected a conversation root id");
+    this.db.run("INSERT OR REPLACE INTO root_releases(root_id,released_at) VALUES(?,?)", [rootId,this.now()]);
+    return { ok:true,root_id:rootId };
   }
   /** Idempotent: record that the operator reported/bounced this message for this reason. */
   markProblemReported(id: number, reason: string) {
@@ -370,4 +391,4 @@ const HOST_SESSION_PATTERNS: Record<string,RegExp> = {
 };
 // staleOfferMs: an offer not acknowledged this long after its lease expired is not treated
 // as arrival (the hook output may never have reached the model; Astra P1).
-export const WAKE_DEFAULTS = { windowMs:24*3600_000, staleOfferMs:15*60_000, leaseMs:60_000, minGapMs:30_000, receiptTimeoutMs:10*60_000, maxAttempts:3, maxPerHour:20, maxBatch:20 };
+export const WAKE_DEFAULTS = { rootBudgetPerHour:30, windowMs:24*3600_000, staleOfferMs:15*60_000, leaseMs:60_000, minGapMs:30_000, receiptTimeoutMs:10*60_000, maxAttempts:3, maxPerHour:20, maxBatch:20 };

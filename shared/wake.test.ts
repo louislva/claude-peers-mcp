@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PeerStore } from "./store.ts";
+import { PeerStore, WAKE_DEFAULTS } from "./store.ts";
 
 const dirs:string[]=[]; const stores:PeerStore[]=[];
 afterEach(()=>{for(const s of stores.splice(0))s.db.close();for(const d of dirs.splice(0))rmSync(d,{recursive:true,force:true});});
@@ -355,5 +355,24 @@ describe("age window (open item 0)",()=>{
   const f=fixture();optInBoth(f);f.store.send(f.sender,f.codex,"ancient");f.advance(25*3600_000);
   expect(f.store.claimWakes()).toEqual([]);
   const {id}=f.store.send(f.sender,f.codex,"fresh");expect(f.store.claimWakes().map(b=>b.message_ids)).toEqual([[id]]);
+ });
+});
+
+describe("causal-chain budget (open item 5)",()=>{
+ test("replies carry the conversation root and hop count",()=>{
+  const f=fixture();const a=f.store.send(f.sender,f.codex,"q").id;const b=f.store.send(f.codex,f.sender,"a",a).id;const c=f.store.send(f.sender,f.claude,"fwd",b).id;
+  expect(f.store.db.query("SELECT id,root_id,hop FROM messages WHERE id IN (?,?,?) ORDER BY id").all(a,b,c)).toEqual([{id:a,root_id:a,hop:0},{id:b,root_id:a,hop:1},{id:c,root_id:a,hop:2}]);
+ });
+ test("a conversation over its hourly budget stops ringing (mail kept), shows up in the ledger, and a manual release restores it",()=>{
+  const f=fixture();optInBoth(f);
+  let last=f.store.send(f.sender,f.codex,"start").id;
+  for(let i=1;i<WAKE_DEFAULTS.rootBudgetPerHour;i++){last=f.store.send(i%2?f.codex:f.sender,i%2?f.sender:f.codex,`r${i}`,last).id;}
+  f.store.db.run("UPDATE messages SET offer_count=1,delivered=1");        // earlier turns were handled
+  const over=f.store.send(f.sender,f.codex,"one more",last).id;          // exceeds the budget for this root
+  expect(f.store.claimWakes()).toEqual([]);
+  f.advance(121_000);
+  expect(f.store.deliveryProblems().map(p=>[p.message_id,p.reason])).toEqual([[over,"loop-budget"]]);
+  f.store.releaseRoot((f.store.db.query("SELECT root_id FROM messages WHERE id=?").get(over) as any).root_id);
+  expect(f.store.claimWakes().map(b=>b.message_ids)).toEqual([[over]]);
  });
 });
