@@ -14,6 +14,8 @@ function fixture(){
  const sender=reg(1),codex=reg(2),claude=reg(3);
  return {store,sender,codex,claude,reg,advance:(ms:number)=>{time+=ms;}};
 }
+/** Claim and report every batch through its own attempt id (the fenced path). */
+const ring=(f:ReturnType<typeof fixture>,ok=true,err?:string)=>{const bs=f.store.claimWakes();for(const b of bs)f.store.markWoken(b.message_ids,ok,err,b.attempt_id!);return bs;};
 const optInBoth=(f:ReturnType<typeof fixture>)=>{
  f.store.optIn(f.codex,{harness:"codex",host_session_id:"01a0da28-f06c-7a62-b236-cf37ef228046"});
  f.store.optIn(f.claude,{harness:"claude-desktop",host_session_id:"local_a7661a7f-932d-4a9a-aee7-eacd33e50365"});
@@ -40,7 +42,7 @@ describe("wake-ups are opt-in and separate from delivery",()=>{
  });
  test("waking never acknowledges or offers the message",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
-  f.store.markWoken(f.store.claimWakes()[0]!.message_ids,true);
+  ring(f);
   expect(f.store.db.query("SELECT delivered,offer_count,acknowledged_at FROM messages WHERE id=?").get(id)).toEqual({delivered:0,offer_count:0,acknowledged_at:null});
   expect(f.store.poll(f.codex).map(m=>m.id)).toEqual([id]);
  });
@@ -49,14 +51,14 @@ describe("wake-ups are opt-in and separate from delivery",()=>{
 describe("retry, receipt timeout and give-up",()=>{
  test("a successful wake is not repeated until the receipt timeout passes with the mail still unseen",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
-  f.store.markWoken([id],true);f.advance(5*60_000);
+  ring(f);f.advance(5*60_000);
   expect(f.store.claimWakes()).toEqual([]);
   f.advance(6*60_000);
   expect(f.store.claimWakes().map(b=>b.message_ids)).toEqual([[id]]);
  });
  test("a woken message the recipient fetched AND acknowledged is never re-woken",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
-  f.store.markWoken(f.store.claimWakes()[0]!.message_ids,true);f.store.poll(f.codex);f.store.acknowledge(f.codex,[id]);f.advance(60*60_000);
+  ring(f);f.store.poll(f.codex);f.store.acknowledge(f.codex,[id]);f.advance(60*60_000);
   expect(f.store.claimWakes()).toEqual([]);expect(f.store.deliveryProblems()).toEqual([]);
  });
  test("Astra P1: an offer that never reached the model (lost hook output) is not a permanent receipt",()=>{
@@ -64,9 +66,9 @@ describe("retry, receipt timeout and give-up",()=>{
   f.store.poll(f.codex);                       // offered, then the hook's output is lost
   f.advance(5*60_000);expect(f.store.claimWakes()).toEqual([]);   // recent offer: recipient may be mid-turn
   f.advance(11*60_000);                        // offered 16 min ago, still unacked
-  expect(f.store.claimWakes().map(b=>b.message_ids)).toEqual([[id]]);
-  for(let i=0;i<2;i++){f.store.markWoken([id],true);f.advance(11*60_000);f.store.claimWakes();}
-  f.store.markWoken([id],true);f.advance(61*60_000);
+  expect(ring(f).map(b=>b.message_ids)).toEqual([[id]]);
+  for(let i=0;i<2;i++){f.advance(11*60_000);expect(ring(f)).toHaveLength(1);}
+  f.advance(61*60_000);
   expect(f.store.claimWakes()).toEqual([]);    // bounded: 3 attempts
   expect(f.store.deliveryProblems().map(p=>p.reason)).toEqual(["wake-failed"]);
   expect(f.store.wakeAttention().map(m=>m.id)).toEqual([id]);
@@ -74,8 +76,7 @@ describe("retry, receipt timeout and give-up",()=>{
  test("failed wakes back off, stop after 3 attempts and surface as needing attention",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
   for(let attempt=1;attempt<=3;attempt++){
-   const claimed=f.store.claimWakes();expect(claimed.map(b=>b.message_ids)).toEqual([[id]]);
-   f.store.markWoken([id],false,`codex queue exit 1 (#${attempt})`);
+   const claimed=ring(f,false,`codex queue exit 1 (#${attempt})`);expect(claimed.map(b=>b.message_ids)).toEqual([[id]]);
    expect(f.store.claimWakes()).toEqual([]);
    f.advance(10*60_000);
   }
@@ -100,12 +101,12 @@ describe("recipient controls and loop guards",()=>{
  });
  test("at most 20 wakes per recipient per hour; excess waits, it is not dropped",()=>{
   const f=fixture();optInBoth(f);
-  for(let i=0;i<21;i++){f.store.send(f.sender,f.codex,`m${i}`);const b=f.store.claimWakes();if(i<20)expect(b).toHaveLength(1);else expect(b).toEqual([]);f.store.markWoken(b.flatMap(x=>x.message_ids),true);f.advance(31_000);}
+  for(let i=0;i<21;i++){f.store.send(f.sender,f.codex,`m${i}`);const b=ring(f);if(i<20)expect(b).toHaveLength(1);else expect(b).toEqual([]);f.advance(31_000);}
   f.advance(60*60_000);expect(f.store.claimWakes()).toHaveLength(1);
  });
  test("wakes to one recipient are at least 30 seconds apart; new mail coalesces into the next batch",()=>{
   const f=fixture();optInBoth(f);const a=f.store.send(f.sender,f.codex,"a").id;
-  f.store.markWoken(f.store.claimWakes()[0]!.message_ids,true);
+  ring(f);
   const b=f.store.send(f.sender,f.codex,"b").id,c=f.store.send(f.sender,f.codex,"c").id;
   expect(f.store.claimWakes()).toEqual([]);f.advance(31_000);
   expect(f.store.claimWakes().map(x=>x.message_ids)).toEqual([[b,c]]);expect(a).toBeLessThan(b);
@@ -180,12 +181,12 @@ describe("the operator answers for every message until it arrives",()=>{
  });
  test("exhausted wakes are reported with the last error",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
-  for(let i=0;i<3;i++){f.store.claimWakes();f.store.markWoken([id],false,"session is archived");f.advance(5*60_000);}
+  for(let i=0;i<3;i++){ring(f,false,"session is archived");f.advance(5*60_000);}
   expect(f.store.deliveryProblems()).toEqual([{message_id:id,from_id:f.sender,to_id:f.codex,reason:"wake-failed",detail:"session is archived"}]);
  });
  test("mail woken but still not picked up after two receipt timeouts is reported",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.claude,"x");
-  f.store.markWoken(f.store.claimWakes()[0]!.message_ids,true);f.advance(21*60_000);
+  ring(f);f.advance(21*60_000);
   expect(f.store.deliveryProblems().map(p=>p.reason)).toEqual(["woken-not-picked-up"]);expect(id).toBeGreaterThan(0);
  });
  test("arrived mail, and old history outside the 24-hour window, are never reported",()=>{
@@ -213,8 +214,8 @@ describe("receipts for the operator's own actions are durable",()=>{
 describe("revocation is re-checked right before each dispatch (Astra P1)",()=>{
  const host="01a0da28-f06c-7a62-b236-cf37ef228046";
  test("still-eligible ids pass the re-check unchanged",()=>{
-  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");f.store.claimWakes();
-  expect(f.store.recheckWake(host,[id])).toEqual([id]);
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");const [b]=f.store.claimWakes();
+  expect(f.store.recheckWake(host,[id],b!.attempt_id!)).toEqual([id]);
  });
  for (const [name,revoke] of [
   ["opt-out",(f:any)=>f.store.optOut(f.codex)],
@@ -226,7 +227,7 @@ describe("revocation is re-checked right before each dispatch (Astra P1)",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");const [b]=f.store.claimWakes();
   revoke(f);
   expect(f.store.recheckWake(host,[id],b!.attempt_id)).toEqual([]);
-  expect(f.store.db.query("SELECT wake_attempts,wake_lease_until FROM messages WHERE id=?").get(id)).toEqual({wake_attempts:0,wake_lease_until:0});
+  expect(f.store.db.query("SELECT wake_attempts,wake_claim_until,wake_claim_attempt FROM messages WHERE id=?").get(id)).toEqual({wake_attempts:0,wake_claim_until:0,wake_claim_attempt:null});
  });
 });
 
@@ -273,9 +274,9 @@ describe("recheck refunds are once-only and claim-scoped (Astra P1, R1.2)",()=>{
  const attemptsOf=(f:any,id:number)=>(f.store.db.query("SELECT wake_attempts FROM messages WHERE id=?").get(id) as any).wake_attempts;
  test("Astra's repro: exhausted failures stay exhausted after opt-out and repeated rechecks",()=>{
   const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
-  for(let i=0;i<3;i++){const [b]=f.store.claimWakes();f.store.markWoken([id],false,"x",b!.attempt_id);f.advance(10*60_000);}
+  const ids:number[]=[];for(let i=0;i<3;i++){const [b]=ring(f,false,"x");ids.push(b!.attempt_id!);f.advance(10*60_000);}
   f.store.optOut(f.codex);
-  expect(f.store.recheckWake(host,[id])).toEqual([]);expect(f.store.recheckWake(host,[id])).toEqual([]);
+  for(const a of [...ids,...ids])expect(f.store.recheckWake(host,[id],a)).toEqual([]);
   expect(attemptsOf(f,id)).toBe(3);
  });
  test("a duplicate recheck (and duplicate ids) refund at most once",()=>{
@@ -298,6 +299,36 @@ describe("recheck refunds are once-only and claim-scoped (Astra P1, R1.2)",()=>{
   f.store.setDnd(f.codex,60_000);
   f.store.recheckWake(host,[id],old!.attempt_id);
   expect(attemptsOf(f,id)).toBe(2);
-  expect((f.store.db.query("SELECT wake_lease_until FROM messages WHERE id=?").get(id) as any).wake_lease_until).toBeGreaterThan(0);
+  expect(f.store.db.query("SELECT wake_claim_attempt FROM messages WHERE id=?").get(id)).toEqual({wake_claim_attempt:fresh!.attempt_id});
+ });
+});
+
+describe("claim fencing on dispatch and completion (Astra P1, R1.3)",()=>{
+ const host="01a0da28-f06c-7a62-b236-cf37ef228046";
+ const col=(f:any,id:number,c:string)=>(f.store.db.query(`SELECT ${c} AS v FROM messages WHERE id=?`).get(id) as any).v;
+ test("(A) a completed FAILURE is not refunded by a later recheck",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");const [b]=f.store.claimWakes();
+  f.store.markWoken([id],false,"exit 1",b!.attempt_id!);f.store.optOut(f.codex);
+  expect(f.store.recheckWake(host,[id],b!.attempt_id!)).toEqual([]);
+  expect(col(f,id,"wake_attempts")).toBe(1);
+ });
+ test("(B) a stale claimant can neither dispatch nor complete a newer claim",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");
+  const [a]=f.store.claimWakes();f.advance(61_000);const [b]=f.store.claimWakes();
+  expect(f.store.recheckWake(host,[id],a!.attempt_id!)).toEqual([]);          // not eligible for A
+  expect(f.store.markWoken([id],true,undefined,a!.attempt_id!).marked).toBe(0);  // A's completion is fenced off
+  expect(col(f,id,"woken_at")).toBeNull();expect(col(f,id,"wake_claim_attempt")).toBe(b!.attempt_id);
+  expect(f.store.recheckWake(host,[id],b!.attempt_id!)).toEqual([id]);
+ });
+ test("a failure's retry-not-before is not an active claim",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");const [b]=f.store.claimWakes();
+  f.store.markWoken([id],false,"exit 1",b!.attempt_id!);
+  expect(col(f,id,"wake_claim_attempt")).toBeNull();expect(col(f,id,"wake_claim_until")).toBe(0);
+  expect(col(f,id,"wake_retry_after")).toBeGreaterThan(0);
+ });
+ test("reporting without the claim's attempt id is refused",()=>{
+  const f=fixture();optInBoth(f);const {id}=f.store.send(f.sender,f.codex,"x");f.store.claimWakes();
+  expect(()=>(f.store as any).markWoken([id],true)).toThrow("attempt id");
+  expect(()=>(f.store as any).recheckWake(host,[id])).toThrow("attempt id");
  });
 });
