@@ -13,6 +13,7 @@
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { isAlive, readLockPid } from "./lifecycle.ts";
 
 /** Written by the watcher loop every few seconds, even mid-pass:
  *  { pid, at, pass_started_at } (pass_started_at is null between passes). */
@@ -29,11 +30,19 @@ export function assessHealth(s: {
   broker: { status: string; wake?: boolean } | null;
   aliveAt: number | null;
   passStartedAt: number | null;
+  /** Owner-bound health: the stamp only counts if the lock owner wrote it and still runs. */
+  stampOwner?: number | null;
+  lockOwner?: number | null;
+  ownerAlive?: boolean;
 }): string[] {
   const out: string[] = [];
   if (!s.broker) out.push("BROKER-DOWN broker not answering on /health; push Kiel");
   else if (!s.broker.wake) out.push("BROKER-DOWN broker is running without wake support; push Kiel");
-  if (s.aliveAt === null) out.push("WATCHER-DOWN no watcher pass on record; re-arm Monitor now");
+  if (s.lockOwner !== undefined && s.stampOwner !== undefined && s.aliveAt !== null && s.stampOwner !== s.lockOwner)
+    out.push(`WATCHER-DOWN liveness stamp is from supervisor ${s.stampOwner}, not the owner ${s.lockOwner}; re-arm Monitor now`);
+  else if (s.lockOwner && s.ownerAlive === false)
+    out.push(`WATCHER-DOWN owning supervisor ${s.lockOwner} is not running; re-arm Monitor now`);
+  else if (s.aliveAt === null) out.push("WATCHER-DOWN no watcher pass on record; re-arm Monitor now");
   else if (s.now - s.aliveAt > STALE_AFTER_MS)
     out.push(`WATCHER-DOWN last pass ${mins(s.now - s.aliveAt)} min ago; re-arm Monitor now`);
   // Stuck is reported, never re-armed: re-arming would kill a pass that may be mid-dispatch.
@@ -46,7 +55,8 @@ if (import.meta.main) {
   const port = process.env.CLAUDE_PEERS_PORT ?? "7899";
   const broker = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(3000) })
     .then(r => (r.ok ? r.json() : null)).catch(() => null);
-  let aliveAt: number | null = null, passStartedAt: number | null = null;
-  try { const s = JSON.parse(readFileSync(PASS_STAMP, "utf8")); aliveAt = s.at ?? null; passStartedAt = s.pass_started_at ?? null; } catch {}
-  for (const line of assessHealth({ now: Date.now(), broker, aliveAt, passStartedAt })) console.log(line);
+  let aliveAt: number | null = null, passStartedAt: number | null = null, stampOwner: number | null = null;
+  try { const s = JSON.parse(readFileSync(PASS_STAMP, "utf8")); aliveAt = s.at ?? null; passStartedAt = s.pass_started_at ?? null; stampOwner = s.supervisor ?? null; } catch {}
+  const lockOwner = readLockPid();
+  for (const line of assessHealth({ now: Date.now(), broker, aliveAt, passStartedAt, stampOwner, lockOwner, ownerAlive: lockOwner ? isAlive(lockOwner) : undefined })) console.log(line);
 }

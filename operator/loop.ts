@@ -76,7 +76,7 @@ function guard(){ if(!mayRing({supervisorPid:SUPERVISOR_PID,lockPid:readLockPid(
 // Liveness for the operator's heartbeat (health.ts), stamped every 5s even
 // mid-pass: a slow Codex dispatch is busy, not down.
 let passStartedAt:number|null=null;
-const writeStamp=()=>{guard();try{writeFileSync(PASS_STAMP,JSON.stringify({pid:process.pid,at:Date.now(),pass_started_at:passStartedAt}));}catch{}};
+const writeStamp=()=>{guard();try{writeFileSync(PASS_STAMP,JSON.stringify({pid:process.pid,supervisor:SUPERVISOR_PID,at:Date.now(),pass_started_at:passStartedAt}));}catch{}};
 const ROOT=new URL("..",import.meta.url).pathname;
 const sources=()=>["operator","shared"].flatMap(d=>readdirSync(ROOT+d).filter(f=>f.endsWith(".ts")&&!f.endsWith(".test.ts")).map(f=>`${ROOT}${d}/${f}`));
 const stamp=()=>sources().map(f=>`${f}:${statSync(f).mtimeMs}`).join("|");

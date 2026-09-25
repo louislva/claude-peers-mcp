@@ -29,6 +29,16 @@ describe("operator heartbeat health check", () => {
       .toEqual(["WATCHER-STUCK one pass has run 16 min; push Kiel"]);
   });
 
+  test("a fresh stamp from a loop whose supervisor no longer owns the switchboard is not health", () => {
+    expect(assessHealth({ now: NOW, broker: healthyBroker, aliveAt: NOW - 1_000, passStartedAt: null, stampOwner: 100, lockOwner: 200, ownerAlive: true }))
+      .toEqual(["WATCHER-DOWN liveness stamp is from supervisor 100, not the owner 200; re-arm Monitor now"]);
+  });
+
+  test("the owning supervisor is gone: down, however fresh the stamp", () => {
+    expect(assessHealth({ now: NOW, broker: healthyBroker, aliveAt: NOW - 1_000, passStartedAt: null, stampOwner: 200, lockOwner: 200, ownerAlive: false }))
+      .toEqual(["WATCHER-DOWN owning supervisor 200 is not running; re-arm Monitor now"]);
+  });
+
   test("an unreachable broker is reported, and so is the watcher it starves", () => {
     expect(assessHealth({ now: NOW, broker: null, aliveAt: NOW - 5 * MIN, passStartedAt: null })).toEqual([
       "BROKER-DOWN broker not answering on /health; push Kiel",
