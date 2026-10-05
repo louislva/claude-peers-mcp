@@ -10,6 +10,8 @@
  */
 
 import { Database } from "bun:sqlite";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type {
   RegisterRequest,
   RegisterResponse,
@@ -24,7 +26,8 @@ import type {
 } from "./shared/types.ts";
 
 const PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
-const DB_PATH = process.env.CLAUDE_PEERS_DB ?? `${process.env.HOME}/.claude-peers.db`;
+// HOME is unset on Windows unless a POSIX shell launched us (OpenChamber does not).
+const DB_PATH = process.env.CLAUDE_PEERS_DB ?? join(process.env.HOME || homedir(), ".claude-peers.db");
 
 // --- Database setup ---
 
