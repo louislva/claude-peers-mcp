@@ -19,6 +19,7 @@ const server = Bun.serve({
       switch(path) {
         case "/register": return Response.json(store.register(body as any));
         case "/heartbeat": store.heartbeat(body.id); return Response.json({ok:true});
+        case "/turn": return Response.json(store.setTurn(body.id,body.busy===true));
         case "/set-summary": return Response.json(store.setSummary(body.id,body.summary));
         case "/list-peers": return Response.json(store.list(body.scope,body.cwd,body.git_root,body.exclude_id,body.include_offline===true));
         case "/send-message": return Response.json(store.send(body.from_id,body.to_id,body.text,body.reply_to));

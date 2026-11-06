@@ -37,6 +37,8 @@ export class PeerStore {
       this.addColumn("peers", "last_wake_at", "INTEGER NOT NULL DEFAULT 0");
       // NULL = never chose (automatic opt-in applies); 'on'/'off' = explicit choice.
       this.addColumn("peers", "wake_choice", "TEXT");
+      // NULL = idle; else when the current turn began (hook-reported, see setTurn).
+      this.addColumn("peers", "turn_started_at", "INTEGER");
       // Durable receipt of the operator's own report/bounce, keyed by reason.
       this.addColumn("messages", "problem_reported", "TEXT");
       // Which wake attempt currently holds this message's claim (refund scoping).
@@ -157,6 +159,11 @@ export class PeerStore {
   heartbeat(id: string) {
     this.db.run("UPDATE peers SET last_seen=?,online=1 WHERE id=?", [new Date(this.now()).toISOString(),this.peer(id).id]);
   }
+  /** Turn state from the inbox hook: busy at UserPromptSubmit, idle at Stop. A busy peer's hooks deliver its mail, so it is not woken. */
+  setTurn(id: string, busy: boolean) {
+    this.db.run("UPDATE peers SET turn_started_at=? WHERE id=?", [busy ? this.now():null,this.peer(id).id]);
+    return { ok:true };
+  }
   setSummary(id: string, summary: string) {
     if (typeof summary !== "string") throw new Error("Expected summary text");
     // Existing MCP clients have set_summary but not bind_session. An explicit
@@ -258,7 +265,8 @@ export class PeerStore {
           AND (m.woken_at IS NULL OR m.woken_at<=?)
           AND p.wake_policy='on' AND p.host_session_id IS NOT NULL AND p.dnd_until<=?
           AND p.last_wake_at<=?
-        ORDER BY m.id`).all(now-o.staleOfferMs,o.maxAttempts,now,now,new Date(now-o.windowMs).toISOString(),now-o.receiptTimeoutMs,now,now-o.minGapMs) as {id:number,peer_id:string,harness:WakeHarness,host_session_id:string}[];
+          AND (p.turn_started_at IS NULL OR p.turn_started_at<=?)
+        ORDER BY m.id`).all(now-o.staleOfferMs,o.maxAttempts,now,now,new Date(now-o.windowMs).toISOString(),now-o.receiptTimeoutMs,now,now-o.minGapMs,now-o.busyTtlMs) as {id:number,peer_id:string,harness:WakeHarness,host_session_id:string}[];
       const batches = new Map<string,WakeBatch>();
       for (const row of rows) {
         const batch = batches.get(row.peer_id) ?? {peer_id:row.peer_id,harness:row.harness,host_session_id:row.host_session_id,message_ids:[]};
@@ -292,7 +300,8 @@ export class PeerStore {
         if (!owned) continue; // expired, completed, or taken over by a newer claim: neither dispatch nor refund
         const row = this.db.query(`SELECT m.id FROM messages m JOIN peers p ON p.id=m.to_id
           WHERE m.id=? AND m.delivered=0 AND (m.offer_count=0 OR m.lease_until<=?)
-            AND p.wake_policy='on' AND p.dnd_until<=? AND p.host_session_id=?`).get(id,now-WAKE_DEFAULTS.staleOfferMs,now,hostSessionId);
+            AND p.wake_policy='on' AND p.dnd_until<=? AND p.host_session_id=?
+            AND (p.turn_started_at IS NULL OR p.turn_started_at<=?)`).get(id,now-WAKE_DEFAULTS.staleOfferMs,now,hostSessionId,now-WAKE_DEFAULTS.busyTtlMs);
         if (row) ok.push(id);
         // Revoked while this attempt holds the active claim: release it and
         // refund once (clearing the owner makes repeats/stale calls no-ops).
@@ -404,4 +413,6 @@ const HOST_SESSION_PATTERNS: Record<string,RegExp> = {
 };
 // staleOfferMs: an offer not acknowledged this long after its lease expired is not treated
 // as arrival (the hook output may never have reached the model; Astra P1).
-export const WAKE_DEFAULTS = { activityAlertEvery:25, wakeRateAlertPerHour:20, windowMs:24*3600_000, staleOfferMs:15*60_000, leaseMs:60_000, minGapMs:30_000, receiptTimeoutMs:10*60_000, maxAttempts:3, maxBatch:20 };
+export const WAKE_DEFAULTS = { activityAlertEvery:25, wakeRateAlertPerHour:20, windowMs:24*3600_000, staleOfferMs:15*60_000, leaseMs:60_000, minGapMs:30_000, receiptTimeoutMs:10*60_000, maxAttempts:3, maxBatch:20,
+  // A turn marked busy longer than this is treated as unknown (a missed Stop hook), so we ring as before rather than stay silent.
+  busyTtlMs:10*60_000 };

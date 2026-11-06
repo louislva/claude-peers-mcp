@@ -23,7 +23,7 @@ if (typeof input.transcript_path === "string" && /(?:\/subagents\/|\/agent-[^/]+
 if (typeof input.session_id === "string" && process.env.CODEX_THREAD_ID && input.session_id !== process.env.CODEX_THREAD_ID) process.exit(0);
 if (typeof input.model === "string" && typeof input.session_id === "string" && typeof input.transcript_path === "string" && !input.transcript_path.split("/").at(-1)?.includes(input.session_id)) process.exit(0);
 // Prevent Stop continuations from becoming autonomous acknowledgement loops.
-if (mode === "stop" && input.stop_hook_active === true) process.exit(0);
+const stopContinuation = mode === "stop" && input.stop_hook_active === true;
 const event=typeof input.hook_event_name === "string" ? input.hook_event_name : mode === "stop" ? "Stop":"UserPromptSubmit";
 if (!["UserPromptSubmit","PostToolUse","SessionStart","Stop"].includes(event)) process.exit(0);
 const explicitIndex=process.argv.indexOf("--peer-id");
@@ -55,8 +55,14 @@ try {
     const identity=hookWakeIdentity(process.env,session);
     if (identity) await post("/auto-wake",{id:peerId,...identity}).catch(()=>{});
   }
+  // Turn state for the operator (Claude desktop only): a busy session's hooks
+  // deliver its mail, so the operator must not ring it. Best-effort; the broker
+  // times a stale "busy" out.
+  const reportTurn=(busy:boolean)=>explicitIndex<0 && !process.env.CODEX_THREAD_ID ? post("/turn",{id:peerId,busy}).catch(()=>{}):Promise.resolve();
+  if (event==="UserPromptSubmit") await reportTurn(true);
+  if (stopContinuation) { await reportTurn(false); process.exit(0); }
   const {messages}=await post<{messages:Message[]}>("/poll-messages",{id:peerId,protocol:2});
-  if (!messages.length) process.exit(0);
+  if (!messages.length) { if (mode==="stop") await reportTurn(false); process.exit(0); }
   const text=receiptEnvelope(messages,peerId);
   if (mode === "stop") console.log(JSON.stringify({decision:"block",reason:text}));
   else emitContext(text);

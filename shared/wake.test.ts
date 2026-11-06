@@ -378,3 +378,18 @@ describe("long conversations: alerts, never gates (open item 5, Kiel 2026-09-25)
   expect(f.store.activityAlerts().map(a=>a.count)).toEqual([75]);
  });
 });
+
+describe("a mid-turn recipient is not woken: its hooks deliver the mail",()=>{
+ test("busy peer is skipped by claim and recheck; idle, or a stale busy mark, rings",()=>{
+  const f=fixture();optInBoth(f);const id=f.store.send(f.sender,f.claude,"hi").id;
+  f.store.setTurn(f.claude,true);
+  expect(f.store.claimWakes()).toEqual([]);
+  f.store.setTurn(f.claude,false);
+  const [b]=f.store.claimWakes();expect(b!.message_ids).toEqual([id]);
+  f.store.setTurn(f.claude,true); // the turn began after the claim: revoke it
+  expect(f.store.recheckWake(b!.host_session_id,b!.message_ids,b!.attempt_id!)).toEqual([]);
+  expect(f.store.claimWakes()).toEqual([]);
+  f.advance(WAKE_DEFAULTS.busyTtlMs+1); // a missed Stop must not silence the peer
+  expect(f.store.claimWakes().map(x=>x.message_ids)).toEqual([[id]]);
+ });
+});
