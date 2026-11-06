@@ -10,6 +10,15 @@ export interface Peer {
   summary: string;
   registered_at: string; // ISO timestamp
   last_seen: string; // ISO timestamp
+  online: number;
+  session_key: string | null;
+  pid_start: string | null;
+  harness?: string | null;
+  host_session_id?: string | null;
+  wake_policy?: string;
+  dnd_until?: number;
+  last_wake_at?: number;
+  pending_count?: number;
 }
 
 export interface Message {
@@ -18,7 +27,15 @@ export interface Message {
   to_id: PeerId;
   text: string;
   sent_at: string; // ISO timestamp
-  delivered: boolean;
+  delivered: number;
+  acknowledged_at: string | null;
+  lease_until: number;
+  offer_count: number;
+  reply_to?: number | null;
+  woken_at?: number | null;
+  wake_attempts?: number;
+  wake_error?: string | null;
+  wake_lease_until?: number;
 }
 
 // --- Broker API types ---
@@ -29,6 +46,8 @@ export interface RegisterRequest {
   git_root: string | null;
   tty: string | null;
   summary: string;
+  session_key?: string;
+  pid_start?: string;
 }
 
 export interface RegisterResponse {
@@ -50,16 +69,20 @@ export interface ListPeersRequest {
   cwd: string;
   git_root: string | null;
   exclude_id?: PeerId;
+  include_offline?: boolean;
 }
 
 export interface SendMessageRequest {
   from_id: PeerId;
   to_id: PeerId;
   text: string;
+  reply_to?: number | null;
 }
 
 export interface PollMessagesRequest {
   id: PeerId;
+  protocol?: number;
+  force?: boolean;
 }
 
 export interface PollMessagesResponse {

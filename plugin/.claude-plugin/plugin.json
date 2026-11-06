@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "claude-peers",
+  "displayName": "Claude Peers",
+  "version": "0.3.0",
+  "description": "Peer discovery and messaging between Claude Code instances on this machine. Inbound peer messages arrive as claude/channel push instead of waiting for a poll.",
+  "author": {
+    "name": "Kiel Cassidy"
+  },
+  "repository": "https://github.com/kyle-cassidy/claude-peers-mcp",
+  "keywords": [
+    "peers",
+    "messaging",
+    "channel",
+    "mcp"
+  ],
+  "channels": [
+    {
+      "server": "claude-peers",
+      "displayName": "Claude Peers"
+    }
+  ]
+}

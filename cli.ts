@@ -34,7 +34,61 @@ async function brokerFetch<T>(path: string, body?: unknown): Promise<T> {
 
 const cmd = process.argv[2];
 
+function ppid(pid: number): number | undefined {
+  const out = new TextDecoder().decode(Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(pid)]).stdout).trim();
+  return out ? Number(out) : undefined;
+}
+
 switch (cmd) {
+  case "inbox":
+  case "ack":
+  case "bind":
+  case "recover": {
+    const id=process.argv[3];
+    if (!id) { console.error("Expected peer ID"); process.exit(1); }
+    const path=cmd==="inbox" ? "/poll-messages":cmd==="ack" ? "/ack-messages":cmd==="bind" ? "/bind-session":"/recover-inbox";
+    const body=cmd==="inbox" ? {id,protocol:2,force:true}:cmd==="ack" ? {id,message_ids:process.argv.slice(4).map(Number)}:cmd==="bind" ? {id,session_key:process.argv[4]}:{id,from_id:process.argv[4]};
+    try { console.log(JSON.stringify(await brokerFetch(path,body),null,2)); }
+    catch(e) { console.error(String(e)); process.exitCode=1; }
+    break;
+  }
+  case "join": {
+    // One step, run from INSIDE the agent's own shell: bind + opt in + status.
+    const { joinSession } = await import("./shared/join.ts");
+    const i = process.argv.indexOf("--status");
+    const status = i >= 0 ? process.argv.slice(i + 1).join(" ") : undefined;
+    try {
+      const result = await joinSession({
+        env: process.env,
+        post: (path, body) => brokerFetch(path, body),
+        ancestors: () => { const chain: number[] = []; let pid: number | undefined = process.pid; while (pid && pid > 1 && chain.length < 30) { pid = ppid(pid); if (pid) chain.push(pid); } return chain; },
+        parentOf: ppid,
+      }, status);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (e) { console.error(String(e instanceof Error ? e.message : e)); process.exitCode = 1; }
+    break;
+  }
+  case "opt-in":
+  case "opt-out":
+  case "dnd":
+  case "mark-woken":
+  case "recheck":
+  case "wake-attention": {
+    // opt-in <peer> <harness> <host-id> | opt-out <peer> | dnd <peer> <minutes>
+    // mark-woken <ids,comma> ok|fail [error...] | wake-attention
+    const a=process.argv.slice(3);
+    // Operator lines carry "attempt=<n>"; pass it through to the attempt record.
+    const attemptArg=(()=>{const t=a.find(x=>x.startsWith("attempt="));return t?Number(t.slice(8)):undefined;})();
+    const [path,body]=cmd==="opt-in" ? ["/opt-in",{id:a[0],harness:a[1],host_session_id:a[2]}]
+      :cmd==="opt-out" ? ["/opt-out",{id:a[0]}]
+      :cmd==="dnd" ? ["/set-dnd",{id:a[0],duration_ms:Number(a[1])*60_000}]
+      :cmd==="recheck" ? ["/recheck-wake",{host_session_id:a[0],message_ids:(a[1]??"").split(",").filter(Boolean).map(Number),attempt_id:attemptArg}]
+      :cmd==="mark-woken" ? ["/mark-woken",{message_ids:(a[0]??"").split(",").filter(Boolean).map(Number),ok:a[1]==="ok"||a[1]==="uncertain",uncertain:a[1]==="uncertain",error:a.slice(2).filter(x=>!x.startsWith("attempt=")).join(" ")||undefined,attempt_id:attemptArg}]
+      :["/wake-attention",{}];
+    try { console.log(JSON.stringify(await brokerFetch(path as string,body),null,2)); }
+    catch(e) { console.error(String(e)); process.exitCode=1; }
+    break;
+  }
   case "status": {
     try {
       const health = await brokerFetch<{ status: string; peers: number }>("/health");
@@ -88,6 +142,7 @@ switch (cmd) {
         scope: "machine",
         cwd: "/",
         git_root: null,
+        include_offline: process.argv.includes("--all"),
       });
 
       if (peers.length === 0) {
@@ -134,7 +189,7 @@ switch (cmd) {
       const health = await brokerFetch<{ status: string; peers: number }>("/health");
       console.log(`Broker has ${health.peers} peer(s). Shutting down...`);
       // Find and kill the broker process on the port
-      const proc = Bun.spawnSync(["lsof", "-ti", `:${BROKER_PORT}`]);
+      const proc = Bun.spawnSync(["lsof", "-t", `-iTCP:${BROKER_PORT}`, "-sTCP:LISTEN"]);
       const pids = new TextDecoder()
         .decode(proc.stdout)
         .trim()
@@ -156,6 +211,17 @@ switch (cmd) {
 Usage:
   bun cli.ts status          Show broker status and all peers
   bun cli.ts peers           List all peers
+  bun cli.ts peers --all     Include preserved offline inboxes
+  bun cli.ts inbox <id>      Read pending messages without acknowledging
+  bun cli.ts ack <id> <message-id...>  Acknowledge messages after reading
+  bun cli.ts bind <id> <session-key>   Bind a verified session identity
+  bun cli.ts recover <id> <offline-id> Recover pending mail explicitly
   bun cli.ts send <id> <msg> Send a message to a peer
+  bun cli.ts join [--status <text>]  From inside an agent's shell: bind + opt in + status, one step
+  bun cli.ts opt-in <id> <codex|claude-desktop> <host-id>  Allow wake-ups
+  bun cli.ts opt-out <id>    Stop wake-ups (mail still stored)
+  bun cli.ts dnd <id> <minutes>  Do-not-disturb (0 clears)
+  bun cli.ts mark-woken <ids> ok|fail [error]  Operator: report a wake
+  bun cli.ts wake-attention  Mail whose wakes failed 3 times
   bun cli.ts kill-broker     Stop the broker daemon`);
 }

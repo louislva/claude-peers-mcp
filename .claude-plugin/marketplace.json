@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-peers-local",
+  "description": "Local marketplace for the claude-peers channel plugin. This repo doubles as a directory-source marketplace so the MCP server can be installed as a plugin rather than a raw MCP entry.",
+  "owner": {
+    "name": "Kiel Cassidy"
+  },
+  "plugins": [
+    {
+      "name": "claude-peers",
+      "source": "./plugin",
+      "description": "Peer discovery and messaging between Claude Code instances on this machine, delivered as claude/channel push.",
+      "category": "productivity",
+      "author": {
+        "name": "Kiel Cassidy"
+      },
+      "homepage": "https://github.com/kyle-cassidy/claude-peers-mcp"
+    }
+  ]
+}

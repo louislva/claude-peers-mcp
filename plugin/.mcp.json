@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "claude-peers": {
+      "command": "/Users/kielay/.bun/bin/bun",
+      "args": ["/Users/kielay/MCP/servers/claude-peers-mcp/server.ts"]
+    }
+  }
+}
