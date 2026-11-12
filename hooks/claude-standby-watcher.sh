@@ -304,7 +304,7 @@ while kill -0 "$CLAUDE_PID" 2>/dev/null; do
         if [[ "$WAKE_MODE" == "auto" ]]; then
           printf 'Peer mail arrived while idle. %s message(s) drained:\n\n%s\n\nAutonomous mode is enabled by the peer summary. Follow the user\x27s standing scope and normal safety rules.\n' "$COUNT" "$BLOCKS" >&2
         else
-          printf 'Peer mail arrived while idle. %s message(s) drained:\n\n%s\n\nSurface this peer update to the user before taking any new action that expands the current task.\n' "$COUNT" "$BLOCKS" >&2
+          printf 'Peer mail arrived while idle. %s message(s) drained:\n\n%s\n\nHandle it. If it needs nothing from the user (an FYI, an acknowledgement, status with no question or decision for them), end the turn without a message to the user. Otherwise tell the user in one or two lines before taking any new action that expands the current task.\n' "$COUNT" "$BLOCKS" >&2
         fi
         if settle_claim ack && [[ "$SETTLE_STATUS" != "200" || "$SETTLE_COUNT" != "$COUNT" ]]; then
           printf '%s status=%s requested=%s acked=%s\n' "$(date -Iseconds)" "${SETTLE_STATUS:-curl_failed}" "$COUNT" "$SETTLE_COUNT" >> "$STANDBY_LOG" 2>/dev/null
