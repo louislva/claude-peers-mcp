@@ -105,7 +105,7 @@ export function isHookReceivePath(lane: Lane): boolean {
 export function nudgeText(_lane: Lane): string {
   // Receive mode can change when this wake triggers the first native hook.
   // Queue emptiness after that hook says nothing about the attached batch.
-  return "[peer-mail] Process the attached peer messages. If none are attached, fetch pending mail with check_messages. Continue the work.";
+  return "[peer-mail] Process the attached peer messages. If none are attached, fetch pending mail with check_messages. If the mail needs nothing from the user (an FYI, an acknowledgement, status with no question or decision), handle it and end the turn without a message to the user. Otherwise continue the work.";
 }
 // Give up nudging a lane after this many consecutive attempts with mail still
 // unread — a lane whose drain hook is broken must NOT be keystroke-bombed
