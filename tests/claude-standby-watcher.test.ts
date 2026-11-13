@@ -577,3 +577,112 @@ describe("standby watcher default cadence", () => {
     expect(text).toContain("| `CLAUDE_PEERS_STANDBY_IDLE_INTERVAL_SECONDS` | `120` |");
   });
 });
+
+describe("Claude standby watcher batches idle wakes", () => {
+  // A broker stand-in over a real fixture DB: claims return every queued row in
+  // id order, acks mark exactly the claimed ids delivered.
+  function batchFixture(root: string, sessionId: string, anchorPid: number) {
+    const dbPath = join(root, "peers.db");
+    const db = new Database(dbPath);
+    db.run("CREATE TABLE peers (id TEXT PRIMARY KEY, pid INTEGER, thread_id TEXT, seat_key TEXT, summary TEXT NOT NULL)");
+    db.run(`CREATE TABLE messages (id INTEGER PRIMARY KEY, from_id TEXT, to_id TEXT, text TEXT NOT NULL,
+      sent_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, delivered_at TEXT)`);
+    db.run("INSERT INTO peers VALUES ('peer-batch', ?, ?, NULL, 'standby ask')", [anchorPid, sessionId]);
+    const claims: number[] = [];
+    const broker = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const path = new URL(request.url).pathname;
+        const body = await request.json() as { ids?: number[] };
+        if (path === "/claim-by-thread") {
+          claims.push(Date.now());
+          const messages = db.query("SELECT id, from_id, to_id, text, sent_at FROM messages WHERE delivered = 0 ORDER BY id").all()
+            .map((row) => ({ ...(row as object), delivered: false, delivered_at: null }));
+          return Response.json({ peer_id: "peer-batch", drain_id: `drain-${claims.length}`, messages });
+        }
+        for (const id of body.ids ?? []) db.run("UPDATE messages SET delivered = 1, delivered_at = ? WHERE id = ?", [new Date().toISOString(), id]);
+        return Response.json({ ok: true, acked: body.ids?.length ?? 0 });
+      },
+    });
+    servers.push(broker);
+    const send = (id: number, text: string) =>
+      db.run("INSERT INTO messages VALUES (?, 'codex-peer', 'peer-batch', ?, ?, 0, NULL)", [id, text, new Date().toISOString()]);
+    const delivered = (deliveredAt: string) =>
+      db.run("INSERT INTO messages VALUES (1, 'codex-peer', 'peer-batch', 'earlier', ?, 1, ?)", [deliveredAt, deliveredAt]);
+    return { db, dbPath, broker, claims, send, delivered };
+  }
+
+  function startBatchWatcher(root: string, dbPath: string, port: number | undefined, anchorPid: number, sessionId: string, windowMs: string) {
+    const runtime = join(root, "runtime");
+    mkdirSync(runtime, { mode: 0o700 });
+    return startWatcher({
+      HOME: root,
+      XDG_RUNTIME_DIR: runtime,
+      CLAUDE_PEERS_DB: dbPath,
+      CLAUDE_PEERS_PORT: String(port),
+      CLAUDE_PEERS_STANDBY_CLAUDE_PID: String(anchorPid),
+      CLAUDE_PEERS_STANDBY_MCP_PID: String(anchorPid),
+      CLAUDE_PEERS_STANDBY_POLL_INTERVAL_SECONDS: "1",
+      CLAUDE_PEERS_WAKE_BATCH_MS: windowMs,
+    }, sessionId);
+  }
+
+  test("non-urgent mail inside the window is not claimed; after it, one wake carries all queued in order", async () => {
+    const root = mkdtempSync(join(tmpdir(), "claude-peers-standby-batch-"));
+    roots.push(root);
+    const anchor = Bun.spawn(["sleep", "30"]);
+    children.push(anchor);
+    const fx = batchFixture(root, "batch-session", anchor.pid);
+    const windowMs = 4_000;
+    const lastDelivery = Date.now();
+    fx.delivered(new Date(lastDelivery).toISOString());
+    fx.send(2, "first routine");
+    fx.send(3, "second routine");
+    const child = startBatchWatcher(root, fx.dbPath, fx.broker.port, anchor.pid, "batch-session", String(windowMs));
+    await Bun.sleep(1_500);
+    fx.send(4, "third routine");
+    const [code, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stderr as ReadableStream<Uint8Array>).text(),
+    ]);
+    expect(code).toBe(2);
+    // No claim at all before the window closed, then exactly one.
+    expect(fx.claims.length).toBe(1);
+    expect(fx.claims[0]! - lastDelivery).toBeGreaterThanOrEqual(windowMs);
+    expect(stderr).toContain("3 message(s) drained");
+    const order = ["first routine", "second routine", "third routine"].map((text) => stderr.indexOf(text));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(fx.db.query("SELECT COUNT(*) AS n FROM messages WHERE delivered = 0").get()).toEqual({ n: 0 });
+    expect(readFileSync(join(root, ".claude", "logs", "standby-watcher.log"), "utf8")).toContain("wake-held reason=batch-window session=batch-session");
+    fx.db.close();
+  }, 15_000);
+
+  test("URGENT: wakes at once inside the window and brings the held mail with it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "claude-peers-standby-urgent-"));
+    roots.push(root);
+    const anchor = Bun.spawn(["sleep", "30"]);
+    children.push(anchor);
+    const fx = batchFixture(root, "urgent-session", anchor.pid);
+    fx.delivered(new Date().toISOString());
+    fx.send(2, "routine status");
+    const child = startBatchWatcher(root, fx.dbPath, fx.broker.port, anchor.pid, "urgent-session", "600000");
+    await Bun.sleep(2_500);
+    // Held for well over two 1 s polls: queued and never claimed.
+    expect(fx.claims.length).toBe(0);
+    expect(fx.db.query("SELECT delivered FROM messages WHERE id = 2").get()).toEqual({ delivered: 0 });
+    const urgentAt = Date.now();
+    fx.send(3, "  urgent: broker is down");
+    const [code, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stderr as ReadableStream<Uint8Array>).text(),
+    ]);
+    expect(code).toBe(2);
+    expect(fx.claims.length).toBe(1);
+    expect(fx.claims[0]! - urgentAt).toBeLessThan(3_000);
+    expect(stderr).toContain("2 message(s) drained");
+    expect(stderr.indexOf("routine status")).toBeLessThan(stderr.indexOf("urgent: broker is down"));
+    fx.db.close();
+  }, 15_000);
+});
