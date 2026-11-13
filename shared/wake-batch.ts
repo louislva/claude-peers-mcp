@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { wakeBatchMs } from "./delivery-state.ts";
 import { liveMailboxIdsSql } from "./live-mailbox-groups.ts";
 
 /**
@@ -22,14 +23,8 @@ import { liveMailboxIdsSql } from "./live-mailbox-groups.ts";
  * returns false: the caller wakes the way it did before batching existed.
  */
 
-export const DEFAULT_WAKE_BATCH_MS = 600_000;
-
-/** CLAUDE_PEERS_WAKE_BATCH_MS: a non-negative integer; 0 turns batching off. */
-export function wakeBatchMs(raw: string | undefined = process.env.CLAUDE_PEERS_WAKE_BATCH_MS): number {
-  const value = raw?.trim();
-  if (!value) return DEFAULT_WAKE_BATCH_MS;
-  return /^\d+$/.test(value) ? Number(value) : DEFAULT_WAKE_BATCH_MS;
-}
+// The window setting lives beside the undrained-warning threshold it feeds.
+export { DEFAULT_WAKE_BATCH_MS, wakeBatchMs } from "./delivery-state.ts";
 
 /** An urgent message starts with "URGENT:" (any case, after optional whitespace). */
 export function isUrgentText(text: unknown): boolean {

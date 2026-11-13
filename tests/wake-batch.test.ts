@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tick, __resetNudgeBudgetStateForTest, type TickSnapshot } from "../bin/codex-autodrain-poller.ts";
 import { DEFAULT_WAKE_BATCH_MS, isUrgentText, wakeBatchMs, wakeHeld } from "../shared/wake-batch.ts";
 import { wakeBatchDecision } from "../hooks/claude-wake-batch.ts";
+import { recipientDeliveryHealth, undrainedWarnMs, UNDRAINED_WARN_MS } from "../shared/delivery-state.ts";
 
 const WINDOW = 600_000;
 const T0 = Date.parse("2026-11-13T10:00:00.000Z");
@@ -145,5 +146,21 @@ describe("standby watcher helper", () => {
       expect(wakeBatchDecision(path, "thread-1", undefined, T0 + WINDOW)).toBe("wake");
       expect(wakeBatchDecision(`${dir}/missing.db`, "thread-1", undefined, T0 + 1_000)).toBe("wake");
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe("undrained warning follows the batch window", () => {
+  test("held mail at the end of a full window plus one poll is still healthy", () => {
+    expect(undrainedWarnMs(600_000)).toBe(720_000);
+    expect(UNDRAINED_WARN_MS).toBe(undrainedWarnMs(wakeBatchMs()));
+    // Never below the pre-batching 10 minutes, even with batching off.
+    expect(undrainedWarnMs(0)).toBe(600_000);
+    const facts = { pending: 2, lastDrainAt: "2026-11-13T10:00:00.000Z", hasPane: true, hookDriven: true };
+    const windowMs = 600_000;
+    const held = recipientDeliveryHealth({ ...facts, oldestPendingMs: windowMs + 30_000, undrainedWarnMs: undrainedWarnMs(windowMs) });
+    expect(held.state).toBe("healthy");
+    expect(held.warning).toBeNull();
+    const stuck = recipientDeliveryHealth({ ...facts, oldestPendingMs: undrainedWarnMs(windowMs) + 1, undrainedWarnMs: undrainedWarnMs(windowMs) });
+    expect(stuck.state).toBe("undrained");
   });
 });

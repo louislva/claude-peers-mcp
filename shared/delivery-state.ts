@@ -13,8 +13,28 @@ export function claimCutoffIso(nowMs = Date.now()): string {
  * a busy lane is seconds and for an idle one can legitimately be minutes. This
  * is the point past which "queued" stops being useful information to a sender
  * who is waiting on a reply.
+ *
+ * Idle wakes are batched (shared/wake-batch.ts), so non-urgent mail can wait a
+ * full batch window plus one poll before its wake fires. The warning sits two
+ * minutes past the window so held mail is not reported as undelivered.
  */
-export const UNDRAINED_WARN_MS = 10 * 60_000;
+export const DEFAULT_WAKE_BATCH_MS = 600_000;
+
+/** CLAUDE_PEERS_WAKE_BATCH_MS: a non-negative integer; 0 turns batching off. */
+export function wakeBatchMs(raw: string | undefined = process.env.CLAUDE_PEERS_WAKE_BATCH_MS): number {
+  const value = raw?.trim();
+  if (!value) return DEFAULT_WAKE_BATCH_MS;
+  return /^\d+$/.test(value) ? Number(value) : DEFAULT_WAKE_BATCH_MS;
+}
+
+export const UNDRAINED_WARN_MARGIN_MS = 2 * 60_000;
+
+/** Window plus margin, never below the pre-batching 10 minutes. */
+export function undrainedWarnMs(batchMs = wakeBatchMs()): number {
+  return Math.max(10 * 60_000, batchMs + UNDRAINED_WARN_MARGIN_MS);
+}
+
+export const UNDRAINED_WARN_MS = undrainedWarnMs();
 
 /**
  * Recent MCP broker contact (heartbeat or tool call) that is strictly newer
