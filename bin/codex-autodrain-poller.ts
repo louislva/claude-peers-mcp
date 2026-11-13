@@ -31,7 +31,8 @@
  *
  * Run: bun bin/codex-autodrain-poller.ts   (or as a systemd-user unit)
  * Env: CLAUDE_PEERS_DB (default ~/.claude-peers.db), POLL_INTERVAL_MS (15000),
- *      NUDGE_COOLDOWN_MS (60000), DRY_RUN=1 (log what it WOULD do, send nothing).
+ *      NUDGE_COOLDOWN_MS (60000), CLAUDE_PEERS_WAKE_BATCH_MS (600000),
+ *      DRY_RUN=1 (log what it WOULD do, send nothing).
  */
 import { Database } from "bun:sqlite";
 import {
@@ -55,6 +56,7 @@ import { readProcessSnapshot } from "../shared/process-snapshot.ts";
 import { LiveMailboxGroups, liveGroupPrefix, liveMailboxIdsSql } from "../shared/live-mailbox-groups.ts";
 import type { ReconcilePaneThreadResponse, RegisterResponse } from "../shared/types.ts";
 import { isVisibleCodexArgs, singleInteractiveCodexProcess } from "../shared/visible-codex.ts";
+import { wakeBatchMs, wakeHeld } from "../shared/wake-batch.ts";
 import {
   parseTmuxPanes,
   bgSessionIdFromPtyHostArgs,
@@ -85,6 +87,9 @@ const POLL_INTERVAL_MS = envMs("POLL_INTERVAL_MS", 15_000);
 const CODEX_SEAT_RECONCILE_INTERVAL_MS = envMs("CODEX_SEAT_RECONCILE_INTERVAL_MS", 30_000);
 const CODEX_SEAT_GIT_TIMEOUT_MS = envMs("CODEX_SEAT_GIT_TIMEOUT_MS", 2_000);
 const NUDGE_COOLDOWN_MS = envMs("NUDGE_COOLDOWN_MS", 60_000);
+// Batched idle wakes: non-urgent mail wakes a seat at most once per window,
+// measured from its last delivery. 0 disables. See shared/wake-batch.ts.
+const WAKE_BATCH_MS = wakeBatchMs();
 const DRY_RUN = process.env.DRY_RUN === "1";
 const RECONCILE_CODEX_SEATS = process.env.RECONCILE_CODEX_SEATS !== "0";
 // Liveness heartbeat: the END of every tick (success OR caught-error) touches
@@ -327,6 +332,7 @@ const nudgeAttempts = new Map<string, number>(); // peer id -> consecutive nudge
 const nudgeEpisode = new Map<string, number>(); // peer id -> broker-authored unread episode
 const unreadyCodexWakeWarned = new Set<string>(); // avoid logging the same bad identity every tick
 const legacyCodexWakeWarned = new Set<string>(); // compatibility metadata is visible once, without log spam
+const wakeHeldLogged = new Set<string>(); // one log line per held batch, not one per tick
 let nudgeBudgetPersistencePath: string | null = null;
 let nudgeBudgetPersistenceHealthy = true;
 
@@ -1614,6 +1620,7 @@ export interface TickDeps {
   paneIsIdle?: (paneId: string, profile: IdleProfile) => boolean;
   paneIsInCopyMode?: (paneId: string) => boolean;
   nudgeLane?: (lane: Lane, paneId: string) => WakeOnlyNudgeResult;
+  wakeBatchMs?: number;
   now?: () => number;
 }
 
@@ -1709,6 +1716,7 @@ export function tick(db: Database, snapOverride?: TickSnapshot, deps: TickDeps =
   if (budgetDirty && !persistNudgeBudgetState()) return;
   for (const id of unreadyCodexWakeWarned) if (!active.has(id)) unreadyCodexWakeWarned.delete(id);
   for (const id of legacyCodexWakeWarned) if (!active.has(id)) legacyCodexWakeWarned.delete(id);
+  for (const id of wakeHeldLogged) if (!active.has(id)) wakeHeldLogged.delete(id);
   for (const id of paneCache.keys()) if (!active.has(id)) paneCache.delete(id);
   if (lanes.length === 0) return;
 
@@ -1772,6 +1780,16 @@ export function tick(db: Database, snapOverride?: TickSnapshot, deps: TickDeps =
       if (hasNothingToDeliver(lane.unread)) continue;
       const since = clock() - (lastNudge.get(lane.id) ?? 0);
       if (since < NUDGE_COOLDOWN_MS) continue;                   // recently nudged — give it time to drain
+      // Non-urgent mail inside the batch window waits; it stays queued and the
+      // seat drains it on its next turn or the next wake. URGENT: skips the wait.
+      if (wakeHeld(db, [lane.id], clock(), deps.wakeBatchMs ?? WAKE_BATCH_MS)) {
+        if (!wakeHeldLogged.has(lane.id)) {
+          wakeHeldLogged.add(lane.id);
+          log(`hold wake for ${lane.name ?? lane.id}: ${lane.unread} unread, none urgent, last delivery inside ${deps.wakeBatchMs ?? WAKE_BATCH_MS}ms batch window`);
+        }
+        continue;
+      }
+      wakeHeldLogged.delete(lane.id);
       const { paneId, attachId } = resolveLanePane(lane, snap);
       if (!paneId) continue;                                     // bg lane not attached anywhere → unreachable, skip
       // A2: this pane was already nudged this tick by an earlier lane (a foreground

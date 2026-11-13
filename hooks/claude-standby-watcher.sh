@@ -227,7 +227,31 @@ settle_claim() {
   [[ "$SETTLE_COUNT" =~ ^[0-9]+$ ]] || SETTLE_COUNT=0
 }
 
+# Batched idle wakes (shared/wake-batch.ts): while this session's last delivery
+# is inside CLAUDE_PEERS_WAKE_BATCH_MS and none of its queued mail starts with
+# "URGENT:", skip the claim so the mail stays queued, untouched, for one later
+# wake (or the next prompt drain). Any helper failure answers "wake".
+wake_batch_held() {
+  local thread=""
+  [[ "$SESSION_ID" =~ ^[A-Za-z0-9._-]{1,128}$ ]] && thread="$SESSION_ID"
+  [[ "$("$BUN" "$SCRIPT_DIR/claude-wake-batch.ts" "$thread" "$MCP_PID" 2>/dev/null)" == "hold" ]]
+}
+
+pause_before_next_poll() {
+  local now deadline
+  now=$(date +%s)
+  read -r deadline _ < "$STATE_FILE" 2>/dev/null || deadline=0
+  if [[ "$deadline" =~ ^[0-9]+$ ]] && (( now < deadline )); then
+    sleep "$POLL_INTERVAL"
+  else
+    # Remain reachable for the life of the Claude process, but reduce idle
+    # broker traffic after the fast window. A later Stop refreshes the lease.
+    sleep_idle_interruptibly
+  fi
+}
+
 RENDER_FAILURES=0
+WAKE_HOLD_LOGGED=0
 
 # Which identity route is known to work for this session. Latched on first
 # success so we stop paying for a failing probe every tick: "unknown" tries
@@ -237,6 +261,15 @@ ROUTE_MODE="unknown"
 while kill -0 "$CLAUDE_PID" 2>/dev/null; do
   read -r _ CURRENT_MCP_PID < "$STATE_FILE" 2>/dev/null || CURRENT_MCP_PID=""
   if [[ "$CURRENT_MCP_PID" =~ ^[0-9]+$ ]]; then MCP_PID="$CURRENT_MCP_PID"; fi
+  if wake_batch_held; then
+    if (( WAKE_HOLD_LOGGED == 0 )); then
+      WAKE_HOLD_LOGGED=1
+      printf '%s wake-held reason=batch-window session=%s\n' "$(date -Iseconds)" "${SESSION_ID:-none}" >> "$STANDBY_LOG" 2>/dev/null
+    fi
+    pause_before_next_poll
+    continue
+  fi
+  WAKE_HOLD_LOGGED=0
   # Route by thread identity when we have it; fall back to the pid path only for
   # rows that predate thread_id. Both endpoints are atomic claims — resolving an
   # identity and then claiming as two calls would leave a TOCTOU gap, since the
@@ -314,15 +347,7 @@ while kill -0 "$CLAUDE_PID" 2>/dev/null; do
     fi
   fi
 
-  NOW=$(date +%s)
-  read -r DEADLINE _ < "$STATE_FILE" 2>/dev/null || DEADLINE=0
-  if [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( NOW < DEADLINE )); then
-    sleep "$POLL_INTERVAL"
-  else
-    # Remain reachable for the life of the Claude process, but reduce idle
-    # broker traffic after the fast window. A later Stop refreshes the lease.
-    sleep_idle_interruptibly
-  fi
+  pause_before_next_poll
 done
 
 exit 0

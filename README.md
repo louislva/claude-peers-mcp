@@ -354,6 +354,8 @@ Start two client sessions and ask one to call `list_peers`, then send with `send
 | `check_messages` | Explicitly poll and acknowledge messages rendered into the tool result. Required fallback without an active receive hook. |
 | `whoami` | Return this adapter's broker identity, client/receiver mode, working directory, repository, and mirror status. |
 
+Idle wakes are batched. A seat that is idle when mail arrives is woken at most once per `CLAUDE_PEERS_WAKE_BATCH_MS` (10 minutes by default), counted from its last delivery, and that wake carries everything queued since. Start the message text with `URGENT:` (any case) to wake the seat at once. Held mail stays `queued`: `check_messages`, prompt-time drains, and message status see it as usual.
+
 ### Selector and tmux rules
 
 Human names are not assumed unique. Prefer `resolved_name`, `seat_key`, live `id`, visible `tmux_target`, or `tmux_session` plus `tmux_pane_id` when more than one candidate exists.
@@ -438,6 +440,7 @@ History intentionally outlives ephemeral peer rows. Schema version 2 has no mess
 | `CLAUDE_PEERS_STANDBY_IDLE_INTERVAL_SECONDS` | `120` | Reduced cadence after the fast window while Claude remains alive. |
 | `CLAUDE_PEERS_STANDBY_LOCK_WAIT_SECONDS` | `2` | Bounded takeover wait for a prior watcher. |
 | `CLAUDE_PEERS_STANDBY_MAX_RENDER_FAILURES` | `3` | Consecutive render failures after which a watcher releases its claim and exits, freeing the session lock. Each failed claim is released at once, never held until the claim TTL lapses. |
+| `CLAUDE_PEERS_WAKE_BATCH_MS` | `600000` | Minimum gap between idle wakes for non-urgent mail, from the seat's last delivery; read by the standby watcher and the wake poller. `0` wakes on every arrival. Mail starting with `URGENT:` always wakes at once. |
 | `CLAUDE_PEERS_STANDBY_RUNTIME_DIR` | `$XDG_RUNTIME_DIR` or `$HOME/.cache` | Owner-only watcher lock and atomic session state root. |
 | `CLAUDE_PEERS_TMUX_UNCHANGED_WRITE_SUPPRESSION` | `true` | Skip unchanged identity stamps; failed stamps receive three bounded retries. |
 | `CLAUDE_PEERS_HEARTBEAT_PHASE_SPREAD` | `true` | Deterministically de-phase fleet heartbeats. |

@@ -50,6 +50,7 @@ Environment=NUDGE_CLIENTS=codex,gemini,claude,cursor,agy,kimi,grok,opencode
 # Tunables (defaults shown; override here if needed):
 # Environment=POLL_INTERVAL_MS=15000
 # Environment=NUDGE_COOLDOWN_MS=60000
+# Environment=CLAUDE_PEERS_WAKE_BATCH_MS=600000
 # Environment=MAX_NUDGE_ATTEMPTS=5
 
 # === Process hardening (user-mode-safe subset; PrivateTmp INTENTIONALLY OMITTED
